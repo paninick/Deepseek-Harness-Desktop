@@ -85,9 +85,13 @@ profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩�
 
 该声明会转换为 pi-ai 的 `Model.reasoning` + `thinkingLevelMap`，其中每个档位都被显式决定——未声明的档位一律固定为不支持，而不是留给 pi-ai 自己的默认规则：那套规则并不对称（键缺席对五个基础档位意味着「支持」，对 `xhigh`/`max` 却意味着「不支持」），也本不该要求 profile 作者了解。`off` 是唯一的三态键：不写它，选择器不提供 Off，显式请求 Off 会被拒绝——不点名任何档位的请求仍会在不带该参数的情况下发出，提供方随后做什么是它自己的默认行为；声明而不给值（`off:`），则会提供 Off，选中它时什么也不发送——对 `deepseek` 方言则是一个显式的 `thinking: {type: "disabled"}`——这同时覆盖完全不点名任何档位的请求；声明并给值（`off: none`），该值就会作为档位参数在协议中发送。没有任何写法能把 catalog 映射中的键恢复为「未设置」：这份声明就是对外提供的全部，因此把你要保留的 catalog 档位重述出来。
 
-### 推理分派的 compat 开关
+### compat 开关
 
-思考级别如何在协议中传输——单独一个 `reasoning_effort`、DeepSeek 的 `thinking: {type}` 加上档位、z.ai 的 `thinking` 对象，诸如此类——就是 pi-ai 的 `compat.thinkingFormat`，pi-ai 会从端点 URL 猜测它；私有网关的 URL 什么也说明不了，于是说 DeepSeek 方言的网关只会收到 OpenAI 方言的请求，且无从更正。因此 `compat.thinkingFormat` 与 `compat.supportsReasoningEffort` 既可配置在路由上（作为其模型的默认值），也可按模型配置（逐字段胜出），解析顺序为模型 → 路由 → 已安装 catalog 条目 → pi-ai 按 URL 得出的猜测；设置路由级开关会为路由上的每个模型遮蔽 catalog 条目的值，而且除了重述其值，没有任何写法能把某个字段交还给 catalog。`thinkingFormat` 接受 pi-ai 可分派的各种格式，但不含两个 `chat-template` 变体：它们需要的 `chatTemplateKwargs` 本配置并不暴露。两个开关都只存在于 `openai-completions` 上——其余协议的推理形状由协议本身承载——因此在其他协议的模型上设置模型级开关会使解析失败，路由级开关会跳过其他协议的模型，而完全没有 `openai-completions` 模型的路由则会被拒绝。pi-ai compat 面的其余部分（`supportsStore`、`maxTokensField`……）保持自动检测，特意不在此处开放配置。
+思考级别如何在协议中传输——单独一个 `reasoning_effort`、DeepSeek 的 `thinking: {type}` 加上档位、z.ai 的 `thinking` 对象，诸如此类——就是 pi-ai 的 `compat.thinkingFormat`，pi-ai 会从端点 URL 猜测它；私有网关的 URL 什么也说明不了，于是说 DeepSeek 方言的网关只会收到 OpenAI 方言的请求，且无从更正。因此 `compat.thinkingFormat` 与 `compat.supportsReasoningEffort` 既可配置在路由上（作为其模型的默认值），也可按模型配置（逐字段胜出），解析顺序为模型 → 路由 → 已安装 catalog 条目 → pi-ai 按 URL 得出的猜测；设置路由级开关会为路由上的每个模型遮蔽 catalog 条目的值，而且除了重述其值，没有任何写法能把某个字段交还给 catalog。`thinkingFormat` 接受 pi-ai 可分派的各种格式，但不含两个 `chat-template` 变体：它们需要的 `chatTemplateKwargs` 本配置并不暴露。
+
+`compat.supportsDeveloperRole` 解决的同样是 URL 回答不了的消息形状问题：端点是否接受 OpenAI 的 `developer` 角色承载系统级指令。部分 OpenAI 兼容网关——Volcengine ARK coding 端点即是一例——只接受 `system`、`assistant`、`user`、`tool`，遇到 `developer` 消息会返回 400；将此开关设为 false 可让 pi-ai 改发 `system`。它的解析链与推理开关相同：模型 → 路由 → 已安装 catalog 条目 → 按 URL 得出的猜测。
+
+三个开关都只存在于 `openai-completions` 上——其余协议的对应行为由协议本身承载——因此在其他协议的模型上设置模型级开关会使解析失败，路由级开关会跳过其他协议的模型，而完全没有 `openai-completions` 模型的路由则会被拒绝。pi-ai compat 面的其余部分（`supportsStore`、`maxTokensField`……）保持自动检测，特意不在此处开放配置。
 
 条目与已安装 catalog 都没有给出尺寸的模型，会采用该路由的 `defaultContextWindow`（262,144）与 `defaultMaxTokens`（32,768），因此一份只公布 id 的列表同样能产出可服务的路由。两个回退值本质上都是猜测，这正是它们作为路由字段、供网关服务更小模型的部署一次性更正的原因，而不是埋在适配器里的常量；回退值只用于给模型定尺寸，绝不会变成单次请求上限。
 
@@ -138,9 +142,9 @@ profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩�
 
 所选模型 descriptor 提供协议实现。这包括原生 API 差异，例如 descriptor 使用 Responses API 而非 Chat Completions 的 OpenAI 模型；harness 适配器不会按模型名称硬编码端点选择。
 
-成功的 assistant 响应会将经版本化的无损 JSON 回放状态与生成该响应的提供方和模型一同存储。请求时，`LlmRuntime` 只有在历史提供方路由与目标提供方路由当前由同一个 `PiAiAdapter` 实例拥有时，才会传递回放状态。即使目标提供方或模型改变，适配器也会验证状态并恢复 pi-ai 响应 id 与提供方 signature；随后由 pi-ai 判定目标 API 可以复用哪些元数据。没有回放状态的历史会被转换为外来的、与提供方无关的内容，绝不伪装为原生 pi-ai 响应。
+成功的 assistant 响应会将经版本化的无损 JSON 回放状态与生成该响应的提供方和模型一同存储，其形式是 `ReplayEnvelope`：一个响应级半区（kind、版本、API、路由、响应 id、原生停止原因），加上每个流式块一条、携带该块 signature 的逐块条目。逐块对齐正是 `BlockAssembler` 在组装丢弃某个块（`max-tokens` 下的工具调用）时裁剪的对象，因此存储的条目始终描述存储的内容——保留的块保有其 signature。请求时，`LlmRuntime` 只有在历史提供方路由与目标提供方路由当前由同一个 `PiAiAdapter` 实例拥有时，才会传递回放状态。即使目标提供方或模型改变，适配器也会验证状态并恢复 pi-ai 响应 id 与提供方 signature；随后由 pi-ai 判定目标 API 可以复用哪些元数据。没有回放状态的历史会被转换为外来的、与提供方无关的内容，绝不伪装为原生 pi-ai 响应。
 
-如果 listener 改写已组装 assistant 内容，loop 会在记录消息前丢弃回放状态，因为其提供方元数据不再描述该内容。无效版本、格式错误元数据、消息与回放状态之间的提供方／模型不匹配，以及内容／块不匹配都会显式以 `LlmError('INVALID_REPLAY_STATE')` 失败。
+持久化内容是权威记录；回放状态只负责恢复原生保真度。当前构建无法使用的已存状态——其他适配器的 kind、其他版本（包括旧日志携带的平铺前信封形式）、格式错误的元数据、消息与回放状态之间的提供方／模型不匹配，或内容／块不匹配——会把这一条 assistant 消息降级为同样的外来提供方无关转换而不是让请求失败，插件通过其 `onReplayDegrade` 钩子记录 `INVALID_REPLAY_STATE` 诊断。
 
 ## 词汇差异
 

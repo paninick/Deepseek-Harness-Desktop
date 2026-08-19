@@ -826,6 +826,48 @@ describe('reasoning-dispatch compat switches', () => {
       anthropic: { compat: { thinkingFormat: 'openai' } },
     })).toThrow(/no model on the route speaks openai-completions/)
   })
+
+  it('applies a model-level supportsDeveloperRole switch on its own, merging over the catalog entry', () => {
+    const [catalogModel] = getBuiltinModels('deepseek')
+    if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')
+    const inherited = catalogModel.compat as OpenAICompletionsCompat
+
+    const models = modelsOf({
+      deepseek: { models: [{ id: catalogModel.id, compat: { supportsDeveloperRole: false } }] },
+    }, 'deepseek')
+
+    // The message-shape switch resolves without any reasoning switch beside
+    // it, and the catalog's other quirks survive the merge.
+    expect(models.get(catalogModel.id)?.compat).toEqual({ ...inherited, supportsDeveloperRole: false })
+  })
+
+  it('applies a route-level supportsDeveloperRole switch to every openai-completions model', () => {
+    const models = modelsOf({
+      'ark-gateway': {
+        api: 'openai-completions',
+        baseURL: 'https://ark.test/api/coding/v3',
+        compat: { supportsDeveloperRole: false },
+        models: [{ id: 'doubao-vision' }, { id: 'glm-main' }],
+      },
+    }, 'ark-gateway')
+
+    expect((models.get('doubao-vision')?.compat as OpenAICompletionsCompat).supportsDeveloperRole).toBe(false)
+    expect((models.get('glm-main')?.compat as OpenAICompletionsCompat).supportsDeveloperRole).toBe(false)
+  })
+
+  it('rejects a model-level supportsDeveloperRole switch on a protocol that has no such field', () => {
+    expect(() => resolveProfiles({
+      anthropic: {
+        models: [{ id: 'claude-sonnet-4-5', compat: { supportsDeveloperRole: false } }],
+      },
+    })).toThrow(/compat switches exist only on openai-completions/)
+  })
+
+  it('rejects a route-level supportsDeveloperRole switch no model on the route can take', () => {
+    expect(() => resolveProfiles({
+      anthropic: { compat: { supportsDeveloperRole: false } },
+    })).toThrow(/no model on the route speaks openai-completions/)
+  })
 })
 
 describe('resolution snapshots', () => {

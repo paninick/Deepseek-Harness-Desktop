@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/llm/llm-vision-fallback/README.md
-README.md: e874652f42db3287a48ebf3022f298e8dd62507f
-README.zh.md: bb51298d902e667836d4728ba70c1182269bcff6
+README.md: 49ec8c3793af8943ed7d2d3681c7ab5fdfb69d31
+README.zh.md: d86dc5e90e5e4d57ae47d5b2781fb2caa1e5ccf5
