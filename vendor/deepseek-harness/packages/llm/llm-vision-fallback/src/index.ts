@@ -1,14 +1,16 @@
 /**
- * Vision fallback: a user-designated vision-capable model describes image
+ * Vision fallback: user-designated vision-capable models describe image
  * attachments so a text-only main model can act on them.
  *
- * The Models settings page stores the designated route in the
- * `vision-fallback` settings namespace. When the agent loop assembles a
- * request for a model whose declared `inputModalities` excludes `'image'`,
- * it asks this service to rewrite the messages: each image block is replaced
- * by a text block carrying a description generated once by the designated
- * vision model. Every generated description is appended to the session log
- * as a `vision/describe` event before the main request dispatches, so the
+ * The Models settings page stores a primary route (and optionally a backup
+ * route plus a selection policy) in the `vision-fallback` settings
+ * namespace. When the agent loop assembles a request for a model whose
+ * declared `inputModalities` excludes `'image'`, it asks this service to
+ * rewrite the messages: each image block is replaced by a text block
+ * carrying a description generated once by the designated vision model —
+ * under `'auto'` policy a failed primary attempt moves to the backup route.
+ * Every generated description is appended to the session log as a
+ * `vision/describe` event before the main request dispatches, so the
  * rewritten request stays a pure function of the log and later steps (and
  * replays) reuse the logged description instead of calling the vision model
  * again.
@@ -23,6 +25,8 @@ import type { ContentBlock, FinishReason, GenerateOptions, ImageBlock, Message }
 import type { Session } from '@deepseek-ai/dsh-session'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { deadline, MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { shouldFailOver, visionRoutes } from './routing.ts'
+import type { VisionFallbackMode, VisionRoute } from './routing.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -58,18 +62,27 @@ declare module '@deepseek-ai/dsh-session/types' {
 /** Settings namespace carrying the designated vision-model route. */
 export const VISION_FALLBACK_SETTINGS_NAMESPACE = settingsNamespace('vision-fallback')
 
-/** Stored designated vision-model route; both fields absent means disabled. */
+/** Stored designated vision-model routes; both primary fields absent means disabled. */
 export interface VisionFallbackSettings {
-  /** Registered provider route. */
+  /** Registered provider route of the primary vision model. */
   provider?: string
-  /** Provider-owned model id. */
+  /** Provider-owned model id of the primary vision model. */
   model?: string
+  /** Registered provider route of the backup vision model, tried when the primary call fails. */
+  backupProvider?: string
+  /** Provider-owned model id of the backup vision model. */
+  backupModel?: string
+  /** Route selection policy; absent behaves as `'auto'` (primary, then backup). */
+  mode?: VisionFallbackMode
 }
 
 /** Schema of the vision-fallback settings section. */
 export const VISION_FALLBACK_SETTINGS_SCHEMA: z<VisionFallbackSettings> = z.object({
   provider: z.string(),
   model: z.string(),
+  backupProvider: z.string(),
+  backupModel: z.string(),
+  mode: z.union(['auto', 'primary', 'backup']),
 })
 
 /** Composition entry: auxiliary-call limits (the route itself lives in settings). */
@@ -150,10 +163,12 @@ export class VisionFallback extends Service {
   }
 
   /**
-   * The stored vision-model route.
-   * @returns the designated route, or undefined while unset (disabled).
+   * The stored primary vision-model route. The backup route and the mode are
+   * read through {@link routes}; admission gates only need to know a route
+   * exists, which the primary designates on its own.
+   * @returns the designated primary route, or undefined while unset (disabled).
    */
-  selection(): { provider: string; model: string } | undefined {
+  selection(): VisionRoute | undefined {
     const stored = this.source()
     if (stored.provider === undefined || stored.provider === ''
       || stored.model === undefined || stored.model === '') return undefined
@@ -161,12 +176,39 @@ export class VisionFallback extends Service {
   }
 
   /**
-   * Whether a vision-model route is currently designated. Admission gates
+   * The backup vision-model route, when one is stored.
+   * @returns the designated backup route, or undefined while unset.
+   */
+  backupSelection(): VisionRoute | undefined {
+    const stored = this.source()
+    if (stored.backupProvider === undefined || stored.backupProvider === ''
+      || stored.backupModel === undefined || stored.backupModel === '') return undefined
+    return { provider: stored.backupProvider, model: stored.backupModel }
+  }
+
+  /**
+   * The ordered routes a describe call should try under the stored policy
+   * (`'auto'`: primary then backup; `'primary'`/`'backup'`: pinned).
+   * @returns the routes to try, in order; empty while nothing is designated.
+   */
+  routes(): VisionRoute[] {
+    const primary = this.selection()
+    const backup = this.backupSelection()
+    const mode = this.source().mode
+    return visionRoutes({
+      ...primary === undefined ? {} : { primary },
+      ...backup === undefined ? {} : { backup },
+      ...mode === undefined ? {} : { mode },
+    })
+  }
+
+  /**
+   * Whether a vision-model route is currently usable. Admission gates
    * consult this to admit image prompts for text-only main models.
    * @returns whether rewriting can substitute image blocks.
    */
   configured(): boolean {
-    return this.selection() !== undefined
+    return this.routes().length > 0
   }
 
   /**
@@ -187,8 +229,8 @@ export class VisionFallback extends Service {
     signal: AbortSignal,
   ): Promise<Message[]> {
     if (!messages.some(message => contentHasImage(message.content))) return messages
-    const target = this.selection()
-    if (target === undefined) return messages
+    const routes = this.routes()
+    if (routes.length === 0) return messages
     const info = await this.ctx.llm.resolveModelInfo(route.provider, route.model)
     if (info.inputModalities === undefined || info.inputModalities.includes('image')) return messages
 
@@ -203,7 +245,7 @@ export class VisionFallback extends Service {
         out.push(message)
         continue
       }
-      out.push({ ...message, content: await this.substituteBlocks(session, target, message.content, described, signal) })
+      out.push({ ...message, content: await this.substituteBlocks(session, routes, message.content, described, signal) })
     }
     return out
   }
@@ -215,7 +257,7 @@ export class VisionFallback extends Service {
    */
   private async substituteBlocks(
     session: Session,
-    target: { provider: string; model: string },
+    routes: readonly VisionRoute[],
     content: readonly ContentBlock[],
     described: Map<string, string>,
     signal: AbortSignal,
@@ -223,7 +265,7 @@ export class VisionFallback extends Service {
     const blocks: ContentBlock[] = []
     for (const block of content) {
       if (block.type === 'tool-result' && contentHasImage(block.content)) {
-        blocks.push({ ...block, content: await this.substituteBlocks(session, target, block.content, described, signal) })
+        blocks.push({ ...block, content: await this.substituteBlocks(session, routes, block.content, described, signal) })
         continue
       }
       if (block.type !== 'image') {
@@ -234,7 +276,7 @@ export class VisionFallback extends Service {
       const attachmentId = String(block.attachment.attachmentId)
       let description = described.get(attachmentId)
       if (description === undefined) {
-        description = await this.describe(session, target, block, signal)
+        description = await this.describe(session, routes, block, signal)
         described.set(attachmentId, description)
       }
       blocks.push({ type: 'text', text: substitutionText(this.attachmentName(block), description) })
@@ -248,10 +290,38 @@ export class VisionFallback extends Service {
     return typeof name === 'string' && name !== '' ? name : undefined
   }
 
-  /** Generate one description through the designated route and log it. */
+  /**
+   * Generate one description through the designated routes, trying them in
+   * order. A failed attempt moves to the next route unless the user cancelled
+   * the main request; the first success is logged carrying the route that
+   * produced it, so the log shows which route actually served each image.
+   */
   private async describe(
     session: Session,
-    target: { provider: string; model: string },
+    routes: readonly VisionRoute[],
+    block: ImageBlock,
+    signal: AbortSignal,
+  ): Promise<string> {
+    for (const route of routes) {
+      try {
+        return await this.describeWith(session, route, block, signal)
+      } catch (error) {
+        // The last route's failure is the caller's error; an earlier one
+        // moves on only while the main request still wants the description.
+        if (route === routes[routes.length - 1] || !shouldFailOver(error, signal)) throw error
+      }
+    }
+    /* v8 ignore next -- the loop always returns or throws on a non-empty list, and rewriting never calls into an empty one */
+    throw new Error('vision-fallback: no vision route designated')
+  }
+
+  /**
+   * Generate one description through one route and log it. Each attempt gets
+   * its own deadline, so a timed-out primary leaves the backup a full window.
+   */
+  private async describeWith(
+    session: Session,
+    target: VisionRoute,
     block: ImageBlock,
     signal: AbortSignal,
   ): Promise<string> {

@@ -1,10 +1,11 @@
 /**
- * Vision-model picker: one dropdown over every configured model, persisting
- * the designated vision route into the `vision-fallback` settings namespace.
+ * Vision-model picker: dropdowns over every configured model, persisting the
+ * designated vision routes into the `vision-fallback` settings namespace.
  * The host-side vision-fallback plugin reads that namespace; when the main
- * model cannot read images, it calls the designated model to describe them.
- * The control renders only when the host exposes the namespace (the plugin
- * is mounted), and hides itself entirely otherwise.
+ * model cannot read images, it calls the designated model to describe them,
+ * moving to the backup route when the primary attempt fails under the stored
+ * policy. The control renders only when the host exposes the namespace (the
+ * plugin is mounted), and hides itself entirely otherwise.
  */
 
 import { useEffect, useState } from 'react'
@@ -61,11 +62,31 @@ function storedField(namespace: SettingsNamespaceView, field: string): string | 
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
+/** One mutation op as the settings write carries it. */
+interface SettingsOp {
+  op: 'set' | 'unset'
+  path: string[]
+  value?: string
+}
+
+/** Set-or-unset ops for one route's two fields, from an encoded option value. */
+function routeOps(value: string, providerField: string, modelField: string): SettingsOp[] {
+  return value === ''
+    ? [{ op: 'unset', path: [providerField] }, { op: 'unset', path: [modelField] }]
+    : (() => {
+      const [provider = '', model = ''] = value.split('\n')
+      return [
+        { op: 'set', path: [providerField], value: provider },
+        { op: 'set', path: [modelField], value: model },
+      ]
+    })()
+}
+
 /**
- * Render the vision-model dropdown row, or nothing while the host does not
- * expose the vision-fallback namespace.
+ * Render the vision-route rows (primary model, backup model, policy), or
+ * nothing while the host does not expose the vision-fallback namespace.
  * @param props - wire faces, copy, namespace view, and write acknowledgement.
- * @returns the picker row, or null when the feature is absent.
+ * @returns the picker rows, or null when the feature is absent.
  */
 export function VisionModelPicker(props: VisionModelPickerProps): ReactNode {
   const { api, t, namespace, writable, onSaved } = props
@@ -100,23 +121,21 @@ export function VisionModelPicker(props: VisionModelPickerProps): ReactNode {
   const current = currentProvider !== undefined && currentModel !== undefined
     ? routeValue(currentProvider, currentModel)
     : ''
+  const backupProvider = storedField(namespace, 'backupProvider')
+  const backupModel = storedField(namespace, 'backupModel')
+  const backup = backupProvider !== undefined && backupModel !== undefined
+    ? routeValue(backupProvider, backupModel)
+    : ''
+  const mode = storedField(namespace, 'mode') ?? 'auto'
   const known = options ?? []
   // A stored route missing from the catalog (provider removed, model unlisted)
   // stays visible and selected instead of silently snapping to "off".
   const stale = current !== '' && !known.some(option => routeValue(option.provider, option.model) === current)
+  const backupStale = backup !== '' && !known.some(option => routeValue(option.provider, option.model) === backup)
 
-  const save = (value: string): void => {
+  const save = (ops: SettingsOp[]): void => {
     setSaveFailure(undefined)
     setSaving(true)
-    const ops = value === ''
-      ? [{ op: 'unset' as const, path: ['provider'] }, { op: 'unset' as const, path: ['model'] }]
-      : (() => {
-        const [provider = '', model = ''] = value.split('\n')
-        return [
-          { op: 'set' as const, path: ['provider'], value: provider },
-          { op: 'set' as const, path: ['model'], value: model },
-        ]
-      })()
     void api.settings.mutate({ ns: VISION_FALLBACK_NS, ops, expectedRevision: namespace.revision })
       .then((response) => {
         if (!response.result.ok) {
@@ -138,7 +157,7 @@ export function VisionModelPicker(props: VisionModelPickerProps): ReactNode {
           value={current}
           aria-label={t('visionModel')}
           disabled={!writable || saving}
-          onChange={(event) => { save(event.target.value) }}
+          onChange={(event) => { save(routeOps(event.target.value, 'provider', 'model')) }}
         >
           <option value="">{t('visionModelOff')}</option>
           {stale
@@ -154,7 +173,45 @@ export function VisionModelPicker(props: VisionModelPickerProps): ReactNode {
           ))}
         </select>
       </div>
+      <div className={styles['field']}>
+        <span className={styles['fieldLabel']}>{t('visionModelBackup')}</span>
+        <select
+          className={`${styles['input']} ${styles['selectInput']}`}
+          value={backup}
+          aria-label={t('visionModelBackup')}
+          disabled={!writable || saving}
+          onChange={(event) => { save(routeOps(event.target.value, 'backupProvider', 'backupModel')) }}
+        >
+          <option value="">{t('visionModelOff')}</option>
+          {backupStale
+            ? <option value={backup}>{`${backupProvider ?? ''} / ${backupModel ?? ''}`}</option>
+            : null}
+          {known.map(option => (
+            <option
+              key={`backup-${routeValue(option.provider, option.model)}`}
+              value={routeValue(option.provider, option.model)}
+            >
+              {`${option.providerName} / ${option.modelName}`}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className={styles['field']}>
+        <span className={styles['fieldLabel']}>{t('visionModelMode')}</span>
+        <select
+          className={`${styles['input']} ${styles['selectInput']}`}
+          value={mode}
+          aria-label={t('visionModelMode')}
+          disabled={!writable || saving}
+          onChange={(event) => { save([{ op: 'set', path: ['mode'], value: event.target.value }]) }}
+        >
+          <option value="auto">{t('visionModelModeAuto')}</option>
+          <option value="primary">{t('visionModelModePrimary')}</option>
+          <option value="backup">{t('visionModelModeBackup')}</option>
+        </select>
+      </div>
       <p className={styles['advancedHint']}>{t('visionModelHint')}</p>
+      <p className={styles['advancedHint']}>{t('visionModelBackupHint')}</p>
       {loadFailure === undefined
         ? null
         : <p className={styles['error']}>{`${t('visionModelLoadFailed')}: ${loadFailure}`}</p>}
