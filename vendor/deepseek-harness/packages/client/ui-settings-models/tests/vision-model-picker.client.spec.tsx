@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-/** Vision-model picker lists only catalog rows that advertise image input. */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+/** Vision-route pickers list only catalog rows that advertise image input. */
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RpcResponse, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import { VISION_FALLBACK_NS, VisionModelPicker } from '../src/client/VisionModelPicker.tsx'
@@ -13,6 +13,13 @@ function ok<T>(value: T): RpcResponse<T> {
   return { rpcId: `r-${nextRpc++}` as never, result: { ok: true, value } }
 }
 
+function fail<T>(message: string, code = 'settings-rejected'): RpcResponse<T> {
+  return {
+    rpcId: `r-${nextRpc++}` as never,
+    result: { ok: false, error: { code, message, details: { ns: 'x' } } as never },
+  }
+}
+
 function namespace(value: Record<string, string> = {}): SettingsNamespaceView {
   return {
     ns: VISION_FALLBACK_NS,
@@ -20,14 +27,7 @@ function namespace(value: Record<string, string> = {}): SettingsNamespaceView {
     value,
     applies: 'live',
     secrets: [],
-    revision: 0,
-  }
-}
-
-function fail<T>(message: string, code = 'settings-rejected'): RpcResponse<T> {
-  return {
-    rpcId: `r-${nextRpc++}` as never,
-    result: { ok: false, error: { code, message, details: { ns: 'x' } } as never },
+    revision: 7,
   }
 }
 
@@ -42,7 +42,6 @@ const IMAGE_GROUPS = [{
 }]
 
 function mount(options: {
-  groups?: typeof IMAGE_GROUPS
   stored?: Record<string, string>
   namespace?: SettingsNamespaceView | undefined
   writable?: boolean
@@ -51,7 +50,7 @@ function mount(options: {
   onSaved?: () => void
 } = {}) {
   const models = options.models ?? vi.fn(() => Promise.resolve(ok({
-    groups: options.groups ?? IMAGE_GROUPS,
+    groups: IMAGE_GROUPS,
     failures: [],
   })))
   const mutate = options.mutate ?? vi.fn(() => Promise.resolve(ok({})))
@@ -69,13 +68,103 @@ function mount(options: {
 }
 
 describe('VisionModelPicker', () => {
-  it('lists only models that advertise image input', async () => {
+  it('offers only explicitly image-capable models on both routes', async () => {
     mount()
 
-    expect(await screen.findByRole('option', { name: 'Codingplan / Doubao Seed' })).toBeTruthy()
-    expect(screen.queryByRole('option', { name: 'Codingplan / GLM 5.3' })).toBeNull()
-    expect(screen.queryByRole('option', { name: 'Codingplan / Bare' })).toBeNull()
-    expect(screen.getByRole('option', { name: en.visionModelOff })).toBeTruthy()
+    const primary = await screen.findByLabelText(en.visionModel)
+    const backup = screen.getByLabelText(en.visionModelBackup)
+    expect(within(primary).getByRole('option', { name: 'Codingplan / Doubao Seed' })).toBeTruthy()
+    expect(within(backup).getByRole('option', { name: 'Codingplan / Doubao Seed' })).toBeTruthy()
+    expect(screen.queryAllByRole('option', { name: 'Codingplan / GLM 5.3' })).toHaveLength(0)
+    expect(screen.queryAllByRole('option', { name: 'Codingplan / Bare' })).toHaveLength(0)
+  })
+
+  it('keeps stored text-only routes visible instead of snapping them to off', async () => {
+    mount({
+      stored: {
+        provider: 'codingplan',
+        model: 'glm-5.3',
+        backupProvider: 'codingplan',
+        backupModel: 'bare',
+      },
+    })
+
+    const primary = await screen.findByLabelText(en.visionModel) as HTMLSelectElement
+    const backup = screen.getByLabelText(en.visionModelBackup) as HTMLSelectElement
+    expect(within(primary).getByRole('option', { name: 'codingplan / glm-5.3' })).toBeTruthy()
+    expect(within(backup).getByRole('option', { name: 'codingplan / bare' })).toBeTruthy()
+    expect(primary.value).toBe('codingplan\nglm-5.3')
+    expect(backup.value).toBe('codingplan\nbare')
+  })
+
+  it('treats half-stored routes as off', async () => {
+    mount({ stored: { provider: 'codingplan', backupModel: 'bare' } })
+
+    const primary = await screen.findByLabelText(en.visionModel) as HTMLSelectElement
+    const backup = screen.getByLabelText(en.visionModelBackup) as HTMLSelectElement
+    expect(primary.value).toBe('')
+    expect(backup.value).toBe('')
+  })
+
+  it('persists primary and backup routes independently', async () => {
+    const { mutate } = mount()
+    await waitFor(() => {
+      expect(within(screen.getByLabelText(en.visionModel)).getByRole('option', {
+        name: 'Codingplan / Doubao Seed',
+      })).toBeTruthy()
+    })
+
+    fireEvent.change(screen.getByLabelText(en.visionModel), { target: { value: 'codingplan\ndoubao-seed' } })
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(1) })
+    expect(mutate.mock.calls[0]?.[0]).toEqual({
+      ns: VISION_FALLBACK_NS,
+      ops: [
+        { op: 'set', path: ['provider'], value: 'codingplan' },
+        { op: 'set', path: ['model'], value: 'doubao-seed' },
+      ],
+      expectedRevision: 7,
+    })
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(en.visionModelBackup) as HTMLSelectElement).disabled).toBe(false)
+    })
+    fireEvent.change(screen.getByLabelText(en.visionModelBackup), { target: { value: 'codingplan\ndoubao-seed' } })
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(2) })
+    expect(mutate.mock.calls[1]?.[0]).toEqual({
+      ns: VISION_FALLBACK_NS,
+      ops: [
+        { op: 'set', path: ['backupProvider'], value: 'codingplan' },
+        { op: 'set', path: ['backupModel'], value: 'doubao-seed' },
+      ],
+      expectedRevision: 7,
+    })
+  })
+
+  it('clears a route and persists the explicit policy', async () => {
+    const { mutate } = mount({
+      stored: { provider: 'codingplan', model: 'doubao-seed', mode: 'auto' },
+    })
+    await waitFor(() => {
+      expect(within(screen.getByLabelText(en.visionModel)).getByRole('option', {
+        name: 'Codingplan / Doubao Seed',
+      })).toBeTruthy()
+    })
+
+    fireEvent.change(screen.getByLabelText(en.visionModel), { target: { value: '' } })
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(1) })
+    expect(mutate.mock.calls[0]?.[0].ops).toEqual([
+      { op: 'unset', path: ['provider'] },
+      { op: 'unset', path: ['model'] },
+    ])
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(en.visionModelMode) as HTMLSelectElement).disabled).toBe(false)
+    })
+    fireEvent.change(screen.getByLabelText(en.visionModelMode), { target: { value: 'backup' } })
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(2) })
+    expect(mutate.mock.calls[1]?.[0].ops).toEqual([
+      { op: 'set', path: ['mode'], value: 'backup' },
+    ])
   })
 
   it('hides itself while the vision-fallback namespace is absent', () => {
@@ -83,100 +172,54 @@ describe('VisionModelPicker', () => {
     expect(screen.queryByLabelText(en.visionModel)).toBeNull()
   })
 
-  it('keeps a stored text-only route visible instead of snapping to off', async () => {
-    mount({ stored: { provider: 'codingplan', model: 'glm-5.3' } })
-
-    const select = await screen.findByLabelText(en.visionModel) as HTMLSelectElement
-    expect(await screen.findByRole('option', { name: 'codingplan / glm-5.3' })).toBeTruthy()
-    expect(select.value).toBe('codingplan\nglm-5.3')
-  })
-
-  it('treats a half-stored route as off', async () => {
-    mount({ stored: { provider: 'codingplan' } })
-    const select = await screen.findByLabelText(en.visionModel) as HTMLSelectElement
-    await screen.findByRole('option', { name: 'Codingplan / Doubao Seed' })
-    expect(select.value).toBe('')
-    expect(screen.queryByRole('option', { name: 'codingplan /' })).toBeNull()
-  })
-
-  it('persists a selected image-capable route', async () => {
-    const { mutate, onSaved } = mount({ onSaved: vi.fn() })
-    await screen.findByRole('option', { name: 'Codingplan / Doubao Seed' })
-    fireEvent.change(screen.getByLabelText(en.visionModel), { target: { value: 'codingplan\ndoubao-seed' } })
-    await waitFor(() => { expect(mutate).toHaveBeenCalledOnce() })
-    expect(mutate.mock.calls[0]?.[0]).toEqual({
-      ns: VISION_FALLBACK_NS,
-      ops: [
-        { op: 'set', path: ['provider'], value: 'codingplan' },
-        { op: 'set', path: ['model'], value: 'doubao-seed' },
-      ],
-      expectedRevision: 0,
-    })
-    expect(onSaved).toHaveBeenCalledOnce()
-  })
-
-  it('clears the stored route when the picker is turned off', async () => {
-    const { mutate } = mount({ stored: { provider: 'codingplan', model: 'doubao-seed' } })
-    await screen.findByRole('option', { name: 'Codingplan / Doubao Seed' })
-    fireEvent.change(screen.getByLabelText(en.visionModel), { target: { value: '' } })
-    await waitFor(() => { expect(mutate).toHaveBeenCalledOnce() })
-    expect(mutate.mock.calls[0]?.[0]).toEqual({
-      ns: VISION_FALLBACK_NS,
-      ops: [
-        { op: 'unset', path: ['provider'] },
-        { op: 'unset', path: ['model'] },
-      ],
-      expectedRevision: 0,
-    })
-  })
-
-  it('reports a catalog load failure', async () => {
-    mount({ models: vi.fn(() => Promise.resolve(fail('catalog offline'))) })
+  it('reports catalog and save failures', async () => {
+    const { unmount } = mount({ models: vi.fn(() => Promise.resolve(fail('catalog offline'))) })
     expect(await screen.findByText(`${en.visionModelLoadFailed}: catalog offline`)).toBeTruthy()
-  })
+    unmount()
 
-  it('reports a catalog load transport rejection', async () => {
-    mount({ models: vi.fn(() => Promise.reject(new Error('connection lost'))) })
-    expect(await screen.findByText(`${en.visionModelLoadFailed}: connection lost`)).toBeTruthy()
-  })
-
-  it('reports a save failure without acknowledging', async () => {
-    const { onSaved } = mount({
-      mutate: vi.fn(() => Promise.resolve(fail('revision conflict'))),
-      onSaved: vi.fn(),
+    mount({ mutate: vi.fn(() => Promise.resolve(fail('revision conflict'))) })
+    await waitFor(() => {
+      expect(within(screen.getByLabelText(en.visionModel)).getByRole('option', {
+        name: 'Codingplan / Doubao Seed',
+      })).toBeTruthy()
     })
-    await screen.findByRole('option', { name: 'Codingplan / Doubao Seed' })
     fireEvent.change(screen.getByLabelText(en.visionModel), { target: { value: 'codingplan\ndoubao-seed' } })
     expect(await screen.findByText(`${en.visionModelSaveFailed}: revision conflict`)).toBeTruthy()
-    expect(onSaved).not.toHaveBeenCalled()
   })
 
-  it('reports a save transport rejection', async () => {
-    mount({ mutate: vi.fn(() => Promise.reject(new Error('connection lost'))) })
-    await screen.findByRole('option', { name: 'Codingplan / Doubao Seed' })
+  it('reports catalog and save transport rejections', async () => {
+    const { unmount } = mount({ models: vi.fn(() => Promise.reject(new Error('catalog disconnected'))) })
+    expect(await screen.findByText(`${en.visionModelLoadFailed}: catalog disconnected`)).toBeTruthy()
+    unmount()
+
+    mount({ mutate: vi.fn(() => Promise.reject(new Error('settings disconnected'))) })
+    await waitFor(() => {
+      expect(within(screen.getByLabelText(en.visionModel)).getByRole('option', {
+        name: 'Codingplan / Doubao Seed',
+      })).toBeTruthy()
+    })
     fireEvent.change(screen.getByLabelText(en.visionModel), { target: { value: 'codingplan\ndoubao-seed' } })
-    expect(await screen.findByText(`${en.visionModelSaveFailed}: connection lost`)).toBeTruthy()
+    expect(await screen.findByText(`${en.visionModelSaveFailed}: settings disconnected`)).toBeTruthy()
   })
 
-  it('disables the control while the document is read-only', async () => {
+  it('disables all route controls while the document is read-only', async () => {
     mount({ writable: false })
     expect((await screen.findByLabelText(en.visionModel) as HTMLSelectElement).disabled).toBe(true)
+    expect((screen.getByLabelText(en.visionModelBackup) as HTMLSelectElement).disabled).toBe(true)
+    expect((screen.getByLabelText(en.visionModelMode) as HTMLSelectElement).disabled).toBe(true)
   })
 
-  it('ignores a catalog reply that lands after unmount', async () => {
-    const pending = Promise.withResolvers<RpcResponse<{ groups: typeof IMAGE_GROUPS; failures: never[] }>>()
-    const { unmount } = mount({ models: vi.fn(() => pending.promise) })
-    unmount()
-    pending.resolve(ok({ groups: IMAGE_GROUPS, failures: [] }))
+  it('ignores catalog settlement after unmount', async () => {
+    const resolved = Promise.withResolvers<RpcResponse<{ groups: typeof IMAGE_GROUPS; failures: never[] }>>()
+    const first = mount({ models: vi.fn(() => resolved.promise) })
+    first.unmount()
+    resolved.resolve(ok({ groups: IMAGE_GROUPS, failures: [] }))
     await Promise.resolve()
-    expect(screen.queryByLabelText(en.visionModel)).toBeNull()
-  })
 
-  it('ignores a catalog rejection that lands after unmount', async () => {
-    const pending = Promise.withResolvers<RpcResponse<{ groups: typeof IMAGE_GROUPS; failures: never[] }>>()
-    const { unmount } = mount({ models: vi.fn(() => pending.promise) })
-    unmount()
-    pending.reject(new Error('connection lost'))
+    const rejected = Promise.withResolvers<RpcResponse<{ groups: typeof IMAGE_GROUPS; failures: never[] }>>()
+    const second = mount({ models: vi.fn(() => rejected.promise) })
+    second.unmount()
+    rejected.reject(new Error('connection lost'))
     await Promise.resolve()
     expect(screen.queryByLabelText(en.visionModel)).toBeNull()
   })

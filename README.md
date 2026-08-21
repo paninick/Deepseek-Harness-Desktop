@@ -12,14 +12,14 @@
 <p align="center">
   中文 · <a href="README.en.md">English</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ChisaAlter/Deepseek-Harness-Desktop/releases/latest">下载</a>
+  <a href="https://github.com/paninick/Deepseek-Harness-Desktop/releases/latest">下载</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/ChisaAlter/Deepseek-Harness-Desktop/releases/latest"><img src="https://img.shields.io/github/v/release/ChisaAlter/Deepseek-Harness-Desktop" alt="Release" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/ChisaAlter/Deepseek-Harness-Desktop" alt="License" /></a>
+  <a href="https://github.com/paninick/Deepseek-Harness-Desktop/releases/latest"><img src="https://img.shields.io/github/v/release/paninick/Deepseek-Harness-Desktop" alt="Release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/paninick/Deepseek-Harness-Desktop" alt="License" /></a>
   <img src="https://img.shields.io/badge/Windows-x64-0A66C2" alt="Windows x64" />
   <img src="https://img.shields.io/badge/macOS-arm64-111111" alt="macOS arm64" />
 </p>
@@ -30,7 +30,7 @@
 
 ## 安装
 
-到 [Releases](https://github.com/ChisaAlter/Deepseek-Harness-Desktop/releases/latest) 下载，装完不需要本机 Node。
+到 [Releases](https://github.com/paninick/Deepseek-Harness-Desktop/releases/latest) 下载，装完不需要本机 Node。
 
 | | |
 | --- | --- |
@@ -68,7 +68,7 @@ macOS 安装包未签名：下载后右键打开，或执行 `xattr -cr /Applica
 需要 Windows 10+ 或 macOS 14+（Apple Silicon），Node 22.19+ / 24+，pnpm 11。
 
 ```powershell
-git clone https://github.com/ChisaAlter/Deepseek-Harness-Desktop.git
+git clone https://github.com/paninick/Deepseek-Harness-Desktop.git
 cd Deepseek-Harness-Desktop
 npm install
 npm run setup:harness

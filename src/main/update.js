@@ -4,7 +4,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { app, shell } = require('electron');
 
-const GITHUB_OWNER = 'ChisaAlter';
+const GITHUB_OWNER = 'paninick';
 const GITHUB_REPO = 'Deepseek-Harness-Desktop';
 const RELEASES_LATEST = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 const RELEASES_PAGE = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;

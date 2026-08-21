@@ -6,11 +6,11 @@ Themes, wallpapers, and other personalization options.
 
 Download, install, and run — DSH is bundled.
 
-[中文](README.md) · English · [Download](https://github.com/ChisaAlter/Deepseek-Harness-Desktop/releases/latest) · [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+[中文](README.md) · English · [Download](https://github.com/paninick/Deepseek-Harness-Desktop/releases/latest) · [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
 ## Install
 
-Grab a build from [Releases](https://github.com/ChisaAlter/Deepseek-Harness-Desktop/releases/latest). No local Node required.
+Grab a build from [Releases](https://github.com/paninick/Deepseek-Harness-Desktop/releases/latest). No local Node required.
 
 | | |
 | --- | --- |
@@ -48,7 +48,7 @@ The macOS build is unsigned: right-click → Open, or run `xattr -cr /Applicatio
 Windows 10+ or macOS 14+ (Apple Silicon), Node 22.19+ / 24+, pnpm 11.
 
 ```powershell
-git clone https://github.com/ChisaAlter/Deepseek-Harness-Desktop.git
+git clone https://github.com/paninick/Deepseek-Harness-Desktop.git
 cd Deepseek-Harness-Desktop
 npm install
 npm run setup:harness
