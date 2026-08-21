@@ -117,15 +117,11 @@ function IconTrash(): ReactNode {
 type CapacityField = 'contextWindow' | 'maxTokens'
 
 /**
- * Thinking levels this form can declare, in pi-ai's escalation order. Ids are
- * canonical keys. A checked level other than `off` writes that same string as
- * the wire spelling (`high: high`). `off` is the one valueless key: checking
- * it writes `off: null` (offer Off, send nothing). A custom wire rename stays
- * YAML-only.
+ * Thinking levels this form can declare. Ids are pi-ai's canonical keys; the
+ * wire spelling is the same string (`high: high`). `off` / `minimal` stay
+ * YAML-only — a checked box here is a thinking intensity, not "don't think".
  */
 const EFFORT_CHOICES = [
-  { id: 'off', key: 'effort.off' },
-  { id: 'minimal', key: 'effort.minimal' },
   { id: 'low', key: 'effort.low' },
   { id: 'medium', key: 'effort.medium' },
   { id: 'high', key: 'effort.high' },
@@ -283,7 +279,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   const toggleEffort = (index: number, model: ModelDraft, id: EffortId): void => {
     const dict = effortsOf(model)
     if (Object.prototype.hasOwnProperty.call(dict, id)) delete dict[id]
-    else dict[id] = id === 'off' ? null : id
+    else dict[id] = id
     const stillOffers = EFFORT_CHOICES.some(choice => Object.prototype.hasOwnProperty.call(dict, choice.id))
     patch(index, { reasoningEfforts: stillOffers ? dict : undefined })
   }
@@ -355,18 +351,6 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
       const next = new Set(current)
       if (!next.delete(id)) next.add(id)
       return next
-    })
-  }
-
-  const activeCandidates = candidates ?? []
-  const allCandidatesPicked = activeCandidates.length > 0
-    && activeCandidates.every(candidate => picked.has(candidate.id))
-
-  const toggleAllCandidates = (): void => {
-    setPicked((current) => {
-      return activeCandidates.every(candidate => current.has(candidate.id))
-        ? new Set()
-        : new Set(activeCandidates.map(candidate => candidate.id))
     })
   }
 
@@ -568,11 +552,6 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
           </>
         )}
       >
-        <div className={styles['candidateActions']}>
-          <Button variant="ghost" size="sm" onClick={toggleAllCandidates}>
-            {t(allCandidatesPicked ? 'fetchDeselectAll' : 'fetchSelectAll')}
-          </Button>
-        </div>
         <ul className={styles['candidateList']}>
           {(candidates ?? []).map(candidate => (
             <li key={candidate.id} className={styles['candidate']}>

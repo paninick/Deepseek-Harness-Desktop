@@ -13,7 +13,6 @@ import {
   IconTrashOutline16, IconTriangleRightFill14, Menu, StateDot, usePresence,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
-import { abbreviateHomePath } from '@deepseek-ai/dsh-client-runtime/client'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
 import { relativeTime } from '../tree.ts'
@@ -51,7 +50,7 @@ function createdLabel(createdAt: number, t: RowTranslate): string {
   return t('hover.created', { time: `${date} ${pad2(d.getHours())}:${pad2(d.getMinutes())}` })
 }
 
-/** Hover-card body: workspace title, display directory path, absolute creation time. */
+/** Hover-card body: workspace title, full directory path, absolute creation time. */
 function WorkspaceHoverContent({ label, cwd, createdAt, t }: {
   label: string
   cwd: string | undefined
@@ -130,11 +129,10 @@ export function GroupSessionRun({ open, children }: { open: boolean; children: R
  * @param props.onToggle - expand/collapse the group.
  * @param props.onCreate - start a frontend Session inside this Workspace.
  * @param props.drag - optional workspace-row drag wiring.
- * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home, t }: {
+export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, t }: {
   group: GroupNode
   onToggle: () => void
   onCreate: () => void
@@ -142,8 +140,6 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   actions?: { rename: () => void; delete: () => void } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
-  /** Host account home; POSIX home-rooted hover paths display as `~`. */
-  home?: string | undefined
   t: RowTranslate
 }) {
   const row = group
@@ -225,12 +221,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
   return (
     <HoverCard
       anchor={ownRow}
-      content={<WorkspaceHoverContent
-        label={row.label}
-        cwd={row.cwd === undefined ? undefined : abbreviateHomePath(row.cwd, home)}
-        createdAt={row.createdAt}
-        t={t}
-      />}
+      content={<WorkspaceHoverContent label={row.label} cwd={row.cwd} createdAt={row.createdAt} t={t} />}
       disabled={menuOpen}
       copyText={row.cwd}
       copyLabel={t('copy')}

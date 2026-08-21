@@ -57,7 +57,6 @@
   "files": [
     "lib/index.js",
     "lib/invariant.js",
-    "lib/**/*.css",
     "lib/types/**/*.d.ts"
   ],
   "peerDependencies": {

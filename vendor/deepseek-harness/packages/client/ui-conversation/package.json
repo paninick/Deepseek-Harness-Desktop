@@ -48,6 +48,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@deepseek-ai/dsh-settings": "workspace:^",
     "clsx": "^2.0.0",
     "@deepseek-ai/schemastery": "workspace:^"
   },
@@ -60,21 +61,20 @@
     "@deepseek-ai/dsh-client-connection": "workspace:^",
     "@deepseek-ai/dsh-client-locale": "workspace:^",
     "@deepseek-ai/dsh-client-runtime": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-attachment": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-primitives": "workspace:^",
     "@deepseek-ai/dsh-client-ui-settings": "workspace:^",
     "@deepseek-ai/dsh-client-ui-input-trigger": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-slots": "workspace:^",
     "@deepseek-ai/dsh-commands": "workspace:^",
     "@deepseek-ai/dsh-compaction": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-client-web-react": "workspace:^",
     "@deepseek-ai/dsh-llm-retry": "workspace:^",
     "@deepseek-ai/dsh-session-stats": "workspace:^",
     "@deepseek-ai/dsh-token-meter": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
-    "@deepseek-ai/dsh-settings": "workspace:^",
-    "@deepseek-ai/dsh-client-ui-layout": "workspace:^",
-    "@deepseek-ai/dsh-goal": "workspace:^",
-    "@deepseek-ai/dsh-permission-presets": "workspace:^",
-    "@deepseek-ai/dsh-plan-mode": "workspace:^",
-    "@deepseek-ai/dsh-tool-todo": "workspace:^"
+    "react": "^18.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
@@ -87,6 +87,7 @@
     "@deepseek-ai/dsh-client-runtime": "workspace:^",
     "@deepseek-ai/dsh-client-test-runtime": "workspace:^",
     "@deepseek-ai/dsh-client-ui-layout": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-attachment": "workspace:^",
     "@deepseek-ai/dsh-client-ui-primitives": "workspace:^",
     "@deepseek-ai/dsh-client-ui-settings": "workspace:^",
     "@deepseek-ai/dsh-client-ui-input-trigger": "workspace:^",
@@ -95,6 +96,7 @@
     "@deepseek-ai/dsh-compaction": "workspace:^",
     "@deepseek-ai/dsh-goal": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-client-web-react": "workspace:^",
     "@deepseek-ai/dsh-llm-retry": "workspace:^",
     "@deepseek-ai/dsh-permission-presets": "workspace:^",
     "@deepseek-ai/dsh-plan-mode": "workspace:^",
@@ -104,8 +106,7 @@
     "@deepseek-ai/dsh-tool-todo": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@types/react": "~18.3.1",
-    "react": "^18.2.0",
-    "@deepseek-ai/dsh-settings": "workspace:^"
+    "react": "^18.2.0"
   },
   "files": [
     "lib/index.js",

@@ -53,7 +53,7 @@ function scriptedApi(overrides: {
         selected: { provider: r.payload.provider, model: r.payload.model },
       }),
       rename: r => ok(r, { title: 'renamed', seq: 0 }),
-      fork: r => ok(r, { sessionId: sid('s-fork') }),
+      fork: r => ok(r, { sessionId: sid('s-fork'), blank: false }),
       prompt: r => ok(r, { accepted: true as const }),
       attachment: r => ok(r, {
         attachment: { attachmentId: 'a' as never, mediaType: 'image/png', bytes: 1, width: 1, height: 1 },
@@ -72,7 +72,7 @@ function scriptedApi(overrides: {
     },
     host: {
       describe: r => ok(r, {
-        version: '0-test', cwd: '/t', attachedSessions: 0, home: '/h', canOpenPath: true,
+        version: '0-test', cwd: '/t', attachedSessions: 0, home: '/h', canOpenPath: true, scratchCwd: '/t/no-workspace',
       }),
       pickDirectory: r => ok(r, { path: null }),
       listDirectory: r => ok(r, { path: '/t', home: '/t', crumbs: [], entries: [], truncated: false }),
@@ -210,13 +210,13 @@ describe('unary round trip', () => {
       sessions: {
         fork: (request) => {
           seen = request
-          return ok(request, { sessionId: sid('s-child') })
+          return ok(request, { sessionId: sid('s-child'), blank: false })
         },
       },
     })
     const response = await client(api).sessions.fork({ sessionId: sid('s-parent'), atSeq: 7 })
     expect(seen?.payload).toEqual({ sessionId: 's-parent', atSeq: 7 })
-    expect(response.result).toEqual({ ok: true, value: { sessionId: 's-child' } })
+    expect(response.result).toEqual({ ok: true, value: { sessionId: 's-child', blank: false } })
   })
 
   it('routes workspace rename, delete, and ordering through the wire', async () => {

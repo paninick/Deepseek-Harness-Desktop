@@ -4,7 +4,7 @@
  */
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
-import { clientBundle, requestedExternals } from '../packages/client/tsdown.client.ts'
+import { CLIENT_EXTERNALS, clientBundle } from '../packages/client/tsdown.client.ts'
 
 type ResolveId = (source: string) => null | { id: string; external: boolean }
 
@@ -14,10 +14,7 @@ interface CssModulePlugin {
   load?: (this: { addWatchFile: (id: string) => void }, id: string) => Promise<unknown>
 }
 
-/** A representative dynamic bundle using the shared client baseline. */
-const REQUESTING_PACKAGE = '@deepseek-ai/dsh-client-ui-conversation'
-
-function clientConfigs(id = REQUESTING_PACKAGE) {
+function clientConfigs(id = '@deepseek-ai/dsh-client-test') {
   return clientBundle(id, ['lib/types/index.js', 'lib/types/invariant.js'])(
     { env: { DSH_BUILD_FACE: 'client' } },
   ).filter(config => config.platform === 'browser')
@@ -39,10 +36,10 @@ function clientSourceMapPath(packagePath: string): string {
   return fileURLToPath(new URL(`../packages/${packagePath}/lib/client.js.map`, import.meta.url))
 }
 
-function purityResolveId(id = REQUESTING_PACKAGE): ResolveId {
+function purityResolveId(): ResolveId {
   // libEntry is spelled at every call site (no default) so the
   // package-invariants text check can see the invariant entry per package.
-  const configs = clientConfigs(id)
+  const configs = clientConfigs()
   const plugins = (configs[0] as { plugins: { name: string; resolveId?: unknown }[] }).plugins
   const gate = plugins.find(p => p.name === 'dsh-client-bundle-purity')
   if (gate?.resolveId === undefined) throw new Error('purity plugin missing from client config')
@@ -62,16 +59,15 @@ function cssModulePlugin(): CssModulePlugin {
 describe('client bundle purity gate', () => {
   const resolveId = purityResolveId()
 
-  it('leaves default externals and non-scoped specifiers alone', () => {
+  it('leaves platform table entries and non-scoped specifiers alone', () => {
     expect(resolveId('@deepseek-ai/dsh-client-ui-slots')).toBeNull()
+    expect(resolveId('@deepseek-ai/dsh-client-web-react')).toBeNull()
     expect(resolveId('@deepseek-ai/dsh-client-ui-primitives')).toBeNull()
-    expect(resolveId('@deepseek-ai/dsh-client-runtime/client')).toBeNull()
     expect(resolveId('react')).toBeNull()
     expect(resolveId('zod')).toBeNull()
   })
 
-  it('rejects the retired web-react platform package', () => {
-    expect(() => resolveId('@deepseek-ai/dsh-client-web-react')).toThrow(/purity/)
+  it('rejects retired table entries (web-react/store left the 8-entry seed)', () => {
     expect(() => resolveId('@deepseek-ai/dsh-client-web-react/store')).toThrow(/purity/)
   })
 
@@ -93,49 +89,17 @@ describe('client bundle purity gate', () => {
     expect(() => resolveId('@deepseek-ai/dsh-client-web')).toThrow(/purity/)
   })
 
-  it('throws on cross-plugin value imports — bare plugin names and /client subpaths alike', () => {
+  it('throws on cross-plugin value imports — bare plugin names and /client subpaths alike (the rewrite arm is gone)', () => {
     expect(() => resolveId('@deepseek-ai/dsh-client-connection')).toThrow(/purity/)
     expect(() => resolveId('@deepseek-ai/dsh-client-runtime')).toThrow(/purity/)
     expect(() => resolveId('@deepseek-ai/dsh-client-ui-layout/client')).toThrow(/purity/)
   })
 
-  it('admits the parser-preloaded runtime for every dynamic bundle', () => {
+  it('carries exactly one documented temporary exemption: runtime/client (store engine pending rehoming)', () => {
     expect(resolveId('@deepseek-ai/dsh-client-runtime/client')).toBeNull()
-    const withoutRequest = purityResolveId('@deepseek-ai/dsh-client-ui-goal')
-    expect(withoutRequest('@deepseek-ai/dsh-client-runtime/client')).toBeNull()
-  })
-
-  it('externalizes the baseline independently of each package manifest', () => {
-    const requesting = clientConfigs()[0]?.deps as { neverBundle: (specifier: string) => boolean }
-    const plain = clientConfigs('@deepseek-ai/dsh-client-connection')[0]?.deps as {
-      neverBundle: (specifier: string) => boolean
-    }
-
-    expect(requesting.neverBundle('react')).toBe(true)
-    expect(requesting.neverBundle('zod')).toBe(false)
-    expect(plain.neverBundle('react')).toBe(true)
-    expect(plain.neverBundle('@deepseek-ai/dsh-client-runtime/client')).toBe(true)
-  })
-})
-
-describe('client bundle module requests', () => {
-  it('requests what the declaration lists', () => {
-    const requests = requestedExternals('@deepseek-ai/dsh-client-fixture', {
-      external: ['react', 'react/jsx-runtime', '@deepseek-ai/dsh-client-ui-slots'],
-    })
-
-    expect([...requests].sort()).toEqual([
-      '@deepseek-ai/dsh-client-ui-slots', 'react', 'react/jsx-runtime',
-    ])
-  })
-
-  it('requests nothing when the declaration is absent', () => {
-    expect(requestedExternals('@deepseek-ai/dsh-client-fixture', {}).size).toBe(0)
-  })
-
-  it('rejects a malformed declaration instead of reading past it', () => {
-    expect(() => requestedExternals('@deepseek-ai/dsh-client-fixture', { external: 'react' }))
-      .toThrow(/dsh\.client\.external must be a string array/)
+    const clientChannels = CLIENT_EXTERNALS.filter(
+      entry => entry.startsWith('@deepseek-ai/') && entry.endsWith('/client'))
+    expect(clientChannels).toEqual(['@deepseek-ai/dsh-client-runtime/client'])
   })
 })
 

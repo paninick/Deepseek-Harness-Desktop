@@ -3,16 +3,14 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
-import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
+import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
 import type { RpcResponse, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import { ModelsSection, providerCopy } from '../src/client/ModelsSection.tsx'
-import type { ModelsSectionInjected, ModelsSectionProps } from '../src/client/ModelsSection.tsx'
+import type { ModelsSectionInjected } from '../src/client/ModelsSection.tsx'
 import { CustomProviderCard } from '../src/client/CustomProviderCard.tsx'
 import { formatCapacity, parseCapacity } from '../src/client/DeepSeekModelsEditor.tsx'
-import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { ModelsSettingsStore, deriveKeyRef, protocolChoices } from '../src/client/store.ts'
 import { en } from '../src/client/locales.ts'
-import { settingsSchema } from './settings-schema.client.ts'
 
 afterEach(cleanup)
 
@@ -141,14 +139,12 @@ function firstMutate(mutate: ReturnType<typeof vi.fn>): MutateCall {
 
 async function mountSection(options: Parameters<typeof scriptedFace>[0] = {}) {
   const scripted = scriptedFace(options)
-  const controller = new ModelsSettingsStore(
-    scripted.face as unknown as WireFace, settingsSchema, new SettingsDescribeMirror(scripted.face as never))
+  const controller = new ModelsSettingsStore(scripted.face as unknown as WireFace)
   await controller.load()
-  const injected: ModelsSectionProps = {
+  const injected: ModelsSectionInjected = {
     controller,
     useSnapshot: bindSnapshotSelector(controller.store),
     api: scripted.face as never,
-    schema: settingsSchema,
     t,
   }
   render(<ModelsSection {...injected} />)
@@ -187,10 +183,10 @@ function within_(scope: HTMLElement, label: string): HTMLElement {
 describe('protocolChoices', () => {
   it('reads the protocols out of the namespace schema and nothing else', async () => {
     const { namespace } = scriptedFace()
-    expect(protocolChoices(namespace, settingsSchema)).toEqual(PROTOCOLS)
-    expect(protocolChoices(undefined, settingsSchema)).toEqual([])
+    expect(protocolChoices(namespace)).toEqual(PROTOCOLS)
+    expect(protocolChoices(undefined)).toEqual([])
     const plain = { ...namespace, schema: JSON.parse(JSON.stringify(Schema.object({}).toJSON())) as unknown }
-    expect(protocolChoices(plain, settingsSchema)).toEqual([])
+    expect(protocolChoices(plain)).toEqual([])
     await Promise.resolve()
   })
 })
@@ -313,30 +309,12 @@ describe('model list editing', () => {
     ])
   })
 
-  it('offers every pi-ai thinking intensity on a new model row', async () => {
-    await mountSection()
-    openEditor('openai')
-    fireEvent.click(screen.getByRole('button', { name: en.addModel }))
-    const group = screen.getByRole('group', { name: en.effortTitle })
-    expect(within(group).getAllByRole('checkbox').map(box => box.getAttribute('aria-label'))).toEqual([
-      `${en['effort.off']} 1`,
-      `${en['effort.minimal']} 1`,
-      `${en['effort.low']} 1`,
-      `${en['effort.medium']} 1`,
-      `${en['effort.high']} 1`,
-      `${en['effort.xhigh']} 1`,
-      `${en['effort.max']} 1`,
-    ])
-  })
-
   it('writes checked thinking intensities as reasoningEfforts on the model', async () => {
     const { mutate } = await mountSection()
     openEditor('openai')
 
     fireEvent.click(screen.getByRole('button', { name: en.addModel }))
     fireEvent.change(screen.getByLabelText(`${en.modelId} 1`), { target: { value: 'acme-think' } })
-    fireEvent.click(screen.getByLabelText(`${en['effort.off']} 1`))
-    fireEvent.click(screen.getByLabelText(`${en['effort.minimal']} 1`))
     fireEvent.click(screen.getByLabelText(`${en['effort.high']} 1`))
     fireEvent.click(screen.getByLabelText(`${en['effort.max']} 1`))
     fireEvent.click(screen.getByText(en.apply))
@@ -344,18 +322,8 @@ describe('model list editing', () => {
     await waitFor(() => { expect(mutate).toHaveBeenCalled() })
     expect(firstMutate(mutate).ops[0]?.value).toEqual([{
       id: 'acme-think',
-      reasoningEfforts: { off: null, minimal: 'minimal', high: 'high', max: 'max' },
+      reasoningEfforts: { high: 'high', max: 'max' },
     }])
-  })
-
-  it('refuses apply when Off is the only checked thinking intensity', async () => {
-    await mountSection()
-    openEditor('openai')
-    fireEvent.click(screen.getByRole('button', { name: en.addModel }))
-    fireEvent.change(screen.getByLabelText(`${en.modelId} 1`), { target: { value: 'acme-think' } })
-    fireEvent.click(screen.getByLabelText(`${en['effort.off']} 1`))
-    expect(buttonNamed(en.apply).disabled).toBe(true)
-    expect(screen.getByText(`${en.model} 1: ${en.effortOffAlone}`)).toBeTruthy()
   })
 
   it('drops reasoningEfforts when every thinking intensity is unchecked', async () => {
@@ -678,27 +646,6 @@ describe('endpoint interrogation', () => {
     // A disclosed output cap rides along with the candidate that has one.
     expect(firstMutate(mutate).ops[0]?.value).toEqual([{ id: 'a' }, { id: 'b', maxTokens: 2048 }])
   })
-
-  it('selects and clears every discovered candidate in one action', async () => {
-    const discover = vi.fn(() => Promise.resolve(ok({
-      models: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
-    })))
-    await mountSection({ discover })
-    openEditor('openai')
-
-    fireEvent.click(screen.getByText(en.fetchModels))
-    const dialog = await screen.findByRole('dialog')
-    const boxes = [...dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
-    expect(boxes.map(box => box.checked)).toEqual([true, true, true])
-
-    fireEvent.click(within_(dialog, en.fetchDeselectAll))
-    expect(boxes.map(box => box.checked)).toEqual([false, false, false])
-    expect(within_(dialog, en.fetchSelectAll)).toBeTruthy()
-
-    fireEvent.click(within_(dialog, en.fetchSelectAll))
-    expect(boxes.map(box => box.checked)).toEqual([true, true, true])
-    expect(within_(dialog, en.fetchDeselectAll)).toBeTruthy()
-  })
 })
 
 describe('provider rows', () => {
@@ -733,14 +680,12 @@ describe('provider rows', () => {
         active: true,
       }],
     }))) as never
-    const controller = new ModelsSettingsStore(
-      scripted.face as unknown as WireFace, settingsSchema, new SettingsDescribeMirror(scripted.face as never))
+    const controller = new ModelsSettingsStore(scripted.face as unknown as WireFace)
     await controller.load()
     render(<ModelsSection
       controller={controller}
       useSnapshot={bindSnapshotSelector(controller.store)}
       api={scripted.face as never}
-      schema={settingsSchema}
       t={t}
     />)
 
