@@ -17,14 +17,13 @@ export interface DirectoryEntry {
 
 /** host.listDirectory response value: one directory level plus its ancestry. */
 export interface DirectoryListing {
-  /** Absolute path of the listed directory (`\\.\dsh-computer` on the Win32 volume picker). */
+  /** Absolute path of the listed directory. */
   path: string
-  /** The host account's home directory (a jump target, not a crumb ceiling). */
+  /** The host account's home directory (breadcrumb "Home" rooting). */
   home: string
   /**
-   * Ancestor chain from the volume picker (Win32) or filesystem root (POSIX)
-   * to the listed directory inclusive; every crumb is a jump target
-   * (crumb `hidden` is always false).
+   * Ancestor chain from the filesystem root to the listed directory
+   * inclusive; every crumb is a jump target (crumb `hidden` is always false).
    */
   crumbs: DirectoryEntry[]
   /** Direct child directories, name-sorted; symlinks to directories included. */
@@ -42,9 +41,8 @@ export interface HostApi {
    * applied when a new agent doesn't specify them explicitly, absent when the host configures
    * no explicit default (the adapter falls back internally);
    * attachedSessions = count of currently attached sessions (those with a live agent);
-   * canOpenPath = whether this deployment can hand a path to a user-visible native desktop;
-   * scratchCwd = Host-owned directory for Sessions that are not Workspace members
-   * (`$DSH_HOME/no-workspace` or `~/.dsh/no-workspace`), created if absent.
+   * home = the host account home directory (Web display abbreviation on POSIX);
+   * canOpenPath = whether this deployment can hand a path to a user-visible native desktop.
    */
   describe(request: RpcRequest<{}>): Promise<RpcResponse<{
     version: string
@@ -52,8 +50,8 @@ export interface HostApi {
     provider?: string
     model?: string
     attachedSessions: number
+    home: string
     canOpenPath: boolean
-    scratchCwd: string
   }>>
 
   /**
@@ -67,11 +65,10 @@ export interface HostApi {
 
   /**
    * List one directory level for the in-app browser; an absent path lists the
-   * host account's home directory. On Win32, `\\.\dsh-computer` lists accessible
-   * drive roots. Only served under the `browse` capability; unreadable or
-   * missing targets fail with `directory-unreadable`. The carrier's request
-   * signal follows the caller, stopping the backend's scan on disconnect or
-   * timeout.
+   * host account's home directory. Only served under the `browse` capability;
+   * unreadable or missing targets fail with `directory-unreadable`. The
+   * carrier's request signal follows the caller, stopping the backend's scan
+   * on disconnect or timeout.
    */
   listDirectory(
     request: RpcRequest<{ path?: string }>,
@@ -82,7 +79,7 @@ export interface HostApi {
    * Create one child directory under an existing parent (the browser's
    * "New folder"). Only served under the `browse` capability; an existing
    * child fails with `directory-exists`, every other filesystem failure with
-   * `directory-create-failed`. Win32 `\\.\dsh-computer` is not a parent.
+   * `directory-create-failed`.
    */
   createDirectory(
     request: RpcRequest<{ path: string; name: string }>,
