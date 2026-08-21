@@ -846,6 +846,29 @@ describe('compat switches', () => {
     })
   })
 
+  it('defaults developer-role support off only on Volcengine ARK hosts', () => {
+    const model = (baseURL: string, supportsDeveloperRole?: boolean): Model<Api> | undefined => {
+      const compat = supportsDeveloperRole === undefined ? undefined : { supportsDeveloperRole }
+      return modelsOf({
+        'ark-route': {
+          api: 'openai-completions',
+          baseURL,
+          ...compat === undefined ? {} : { compat },
+          models: [{ id: 'ark-model', reasoningEfforts: { off: null, high: 'high' } }],
+        },
+      }, 'ark-route').get('ark-model')
+    }
+
+    expect((model('https://ark.cn-beijing.volces.com/api/v3')?.compat as OpenAICompletionsCompat)
+      .supportsDeveloperRole).toBe(false)
+    expect((model('https://volces.com/api/v3')?.compat as OpenAICompletionsCompat)
+      .supportsDeveloperRole).toBe(false)
+    expect((model('https://ark.cn-beijing.volces.com/api/v3', true)?.compat as OpenAICompletionsCompat)
+      .supportsDeveloperRole).toBe(true)
+    expect(model('https://gateway.example.com/v1')?.compat).toBeUndefined()
+    expect(model('not a url')?.compat).toBeUndefined()
+  })
+
   it('carries a switch both OpenAI protocols declare onto an openai-responses route', () => {
     const models = modelsOf({
       'acme-responses': {

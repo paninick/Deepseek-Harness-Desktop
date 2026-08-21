@@ -724,6 +724,24 @@ function resolveModelReasoning(
 type ModelCompat = OpenAICompletionsCompat | OpenAIResponsesCompat | AnthropicMessagesCompat | BedrockCompat
 
 /**
+ * Whether `baseUrl` is a Volcengine ARK OpenAI-compatible host. pi-ai treats
+ * unrecognized hosts as standard OpenAI and may send reasoning system prompts
+ * as `developer`, which ARK rejects.
+ * @param baseUrl - the model's resolved endpoint.
+ * @returns whether this host is ARK.
+ */
+function volcengineArkEndpoint(baseUrl: string): boolean {
+  let host: string
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase()
+  } catch {
+    // `baseURL` is a free-form string; a value URL cannot parse is not ARK.
+    return false
+  }
+  return host === 'volces.com' || host.endsWith('.volces.com')
+}
+
+/**
  * Resolve one model's compat block from the profile's switches.
  *
  * A model switch wins over the route switch field by field; whatever neither
@@ -739,6 +757,7 @@ type ModelCompat = OpenAICompletionsCompat | OpenAIResponsesCompat | AnthropicMe
  * @param route - the route-level switches, when any.
  * @param base - the installed catalog entry of the same id, when one exists.
  * @param api - the model's resolved wire protocol.
+ * @param baseUrl - the model's resolved endpoint, used for safe host defaults.
  * @returns a `compat` field to spread into the model, or nothing.
  */
 function resolveModelCompat(
@@ -747,6 +766,7 @@ function resolveModelCompat(
   route: PiAiCompatProfile | undefined,
   base: Model<Api> | undefined,
   api: string,
+  baseUrl: string,
 ): { compat: ModelCompat } | Record<string, never> {
   const gate = compatGate(api)
   const configured: Record<string, unknown> = {}
@@ -762,6 +782,13 @@ function resolveModelCompat(
         + ` ${offered.length === 0 ? 'no configurable compat' : offered.join(', ')}`)
     }
     configured[field] = value
+  }
+  if (
+    configured.supportsDeveloperRole === undefined
+    && gate?.supportsDeveloperRole === 'offer'
+    && volcengineArkEndpoint(baseUrl)
+  ) {
+    configured.supportsDeveloperRole = false
   }
   if (Object.keys(configured).length === 0) return {}
   // The installed entry's compat matches the entry's OWN api — a route-level
@@ -896,7 +923,7 @@ export function resolveRouteModels(request: RouteCatalogRequest): RouteCatalog {
       contextWindow,
       maxTokens,
       ...resolveModelReasoning(provider, entry, base),
-      ...resolveModelCompat(provider, entry, request.compat, base, api),
+      ...resolveModelCompat(provider, entry, request.compat, base, api, baseUrl),
     }
   })
   // Per field, not per block: a route may default a switch its completions
