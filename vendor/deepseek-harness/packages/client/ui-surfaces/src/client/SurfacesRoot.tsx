@@ -56,6 +56,8 @@ function renderOccupant(
         readBuffer,
         writeBuffer,
         registerSave,
+        ...(surface.revealLine !== undefined ? { revealLine: surface.revealLine } : {}),
+        ...(surface.revealRequestId !== undefined ? { revealRequestId: surface.revealRequestId } : {}),
       })
     case 'diff':
       return renderSlot('surfaces.diff', { openFile })

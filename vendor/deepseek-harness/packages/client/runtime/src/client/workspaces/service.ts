@@ -7,7 +7,7 @@ import type {
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '../contract/store.ts'
 import { createSnapshotStore } from '../contract/store.ts'
-import type { SessionsPort, SessionsPortList } from '../contract/sessions-port.ts'
+import type { SessionsPort, SessionsPortList, SessionsPortSummary } from '../contract/sessions-port.ts'
 import type { IWorkspaces } from '../contract/workspaces.ts'
 import { WorkspaceManager, type WorkspaceListPhase } from './manager.ts'
 
@@ -105,11 +105,12 @@ export class WorkspaceRuntime implements IWorkspaces {
     // would open a session no grouping surface shows under this workspace.
     // An archived blank is never reused either: reuse would open a session
     // no grouping surface can show, so New Session mints a fresh one instead.
+    // Desktop-plugin contacts and subagent children are not New Session drafts.
     const archived = this.list.getSnapshot().archivedSessionIds
     const sessions = this.sessions.list.getSnapshot()
     for (const id of sessions.ids) {
       const summary = sessions.byId[id]
-      if (summary !== undefined && summary.blank && summary.cwd === workspace.path
+      if (summary !== undefined && reusableBlank(summary) && summary.cwd === workspace.path
         && workspace.sessionIds.includes(summary.id)
         && !archived.includes(summary.id)) return summary.id
     }
@@ -156,7 +157,7 @@ export class WorkspaceRuntime implements IWorkspaces {
     const sessions = this.sessions.list.getSnapshot()
     for (const id of sessions.ids) {
       const summary = sessions.byId[id]
-      if (summary !== undefined && summary.blank && summary.cwd === cwd
+      if (summary !== undefined && reusableBlank(summary) && summary.cwd === cwd
         && !memberIds.has(summary.id)
         && !archived.includes(summary.id)) return summary.id
     }
@@ -301,8 +302,9 @@ export class WorkspaceRuntime implements IWorkspaces {
   /**
    * Open a filesystem path with the Host operating system's default application.
    * @param path - absolute or host-resolvable path.
+   * @param _options - optional jump-to-line; desktop surfaces intercept consumes it and this Host RPC ignores it.
    */
-  async openPath(path: string): Promise<void> {
+  async openPath(path: string, _options?: { line?: number }): Promise<void> {
     const response = await this.api.host.openPath({ path })
     if (!response.result.ok) {
       throw new Error(`path open failed: ${response.result.error.message}`)
@@ -413,6 +415,11 @@ export class WorkspaceRuntime implements IWorkspaces {
       recentWorkspaceId: baselinesReady ? recentWorkspace(workspace.items, sessions.byId) : undefined,
     })
   }
+}
+
+/** True when New Session may land on this empty-log row. */
+function reusableBlank(summary: SessionsPortSummary): boolean {
+  return summary.blank && summary.origin !== 'dshbot' && summary.origin !== 'subagent'
 }
 
 /** True when the persisted current id still names a live conversation. */

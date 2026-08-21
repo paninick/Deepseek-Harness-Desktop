@@ -1,6 +1,7 @@
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { missingRuntimeFiles } = require('../src/main/plugin-runtime-files');
 
 const SKIP_DIRS = new Set([
   '.git',
@@ -56,6 +57,81 @@ const DEV_ONLY_NAMES = new Set([
   'husky',
   'lint-staged',
 ]);
+
+function missingPluginDependencies(packageDir) {
+  return missingRuntimeFiles(packageDir);
+}
+
+function defaultNpmInstall(packageDir) {
+  const nm = path.join(packageDir, 'node_modules');
+  if (fs.existsSync(nm)) {
+    fs.rmSync(nm, { recursive: true, force: true });
+  }
+  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const lockFile = path.join(packageDir, 'package-lock.json');
+  const args = fs.existsSync(lockFile)
+    ? ['ci', '--omit=dev', '--ignore-scripts', '--no-fund', '--no-audit']
+    : ['install', '--omit=dev', '--ignore-scripts', '--no-fund', '--no-audit'];
+  const result = spawnSync(npmCmd, args, {
+    cwd: packageDir,
+    stdio: 'inherit',
+    env: process.env,
+    windowsHide: true,
+    shell: process.platform === 'win32',
+  });
+  if (result.status !== 0) {
+    throw new Error(`${npmCmd} ${args.join(' ')} failed in ${packageDir} (status ${result.status})`);
+  }
+}
+
+/**
+ * extraResources from a plugin directory drops that directory's node_modules.
+ * Copy vendor/<name>/node_modules into the packaged tree when a declared
+ * dependency or its export file is still missing.
+ */
+function restoreVendoredPluginNodeModules(projectDir, resources, packageName) {
+  const srcNm = path.join(projectDir, 'vendor', packageName, 'node_modules');
+  const destPkg = path.join(resources, 'vendor', packageName);
+  if (!fs.existsSync(path.join(destPkg, 'package.json'))) {
+    return { restored: false, reason: 'missing-dest-package' };
+  }
+  if (!fs.existsSync(srcNm)) {
+    return { restored: false, reason: 'missing-source-node-modules' };
+  }
+  const missing = missingPluginDependencies(destPkg);
+  if (missing.length === 0) {
+    return { restored: false, reason: 'already-present' };
+  }
+  fs.cpSync(srcNm, path.join(destPkg, 'node_modules'), { recursive: true, force: true });
+  return { restored: true, missing };
+}
+
+/**
+ * Git-tracked plugin node_modules can omit export files (repo dist/ ignore).
+ * Wipe and npm-install from package.json when the packaged tree is incomplete.
+ * @param {string} packageDir
+ * @param {{ run?: (dir: string) => void, skipIfComplete?: boolean }} [options]
+ */
+function installPluginRuntimeDeps(packageDir, options = {}) {
+  if (!fs.existsSync(path.join(packageDir, 'package.json'))) {
+    return { installed: false, reason: 'missing-package' };
+  }
+  const missing = missingPluginDependencies(packageDir);
+  if (options.skipIfComplete && missing.length === 0) {
+    return { installed: false, reason: 'already-present' };
+  }
+  const run = options.run || defaultNpmInstall;
+  run(packageDir);
+  return { installed: true, missing };
+}
+
+function assertVendoredPluginRuntimeDeps(resources, packageName) {
+  const destPkg = path.join(resources, 'vendor', packageName);
+  const missing = missingPluginDependencies(destPkg);
+  if (missing.length) {
+    throw new Error(`packaged ${packageName} is missing node_modules: ${missing.join(', ')}`);
+  }
+}
 
 function longPath(target) {
   const abs = path.resolve(target);
@@ -403,7 +479,44 @@ function resolveDeployDir(deployEnv) {
   return path.resolve(deployEnv);
 }
 
-function assertHarnessRuntime(harnessDest) {
+function nodePtyPrebuildRelative(platform = process.platform, arch = process.arch) {
+  const folder = `${platform}-${arch}`;
+  if (platform === 'win32') {
+    return path.join('prebuilds', folder, 'conpty.node');
+  }
+  return path.join('prebuilds', folder, 'pty.node');
+}
+
+function resolveNodePtyRoot(harnessDest) {
+  const direct = path.join(harnessDest, 'node_modules', 'node-pty');
+  if (fs.existsSync(path.join(direct, 'package.json'))) {
+    return direct;
+  }
+  throw new Error('安装包缺少 node-pty');
+}
+
+function assertHarnessVersions(harnessDest, pin) {
+  if (!pin || typeof pin.npm !== 'string' || pin.npm.trim() === '') {
+    throw new Error('assertHarnessRuntime requires pin.npm');
+  }
+  const rootPkg = JSON.parse(fs.readFileSync(path.join(harnessDest, 'package.json'), 'utf8'));
+  const cliPkg = JSON.parse(fs.readFileSync(path.join(harnessDest, 'apps', 'cli', 'package.json'), 'utf8'));
+  if (rootPkg.version !== pin.npm || cliPkg.version !== pin.npm) {
+    throw new Error(
+      `安装包 Harness 版本 ${rootPkg.version}/${cliPkg.version} 与 pin.npm ${pin.npm} 不一致`,
+    );
+  }
+}
+
+function assertNodePtyPrebuild(harnessDest, platform = process.platform, arch = process.arch) {
+  const relative = nodePtyPrebuildRelative(platform, arch);
+  const native = path.join(resolveNodePtyRoot(harnessDest), relative);
+  if (!fs.existsSync(native)) {
+    throw new Error(`安装包缺少 node-pty prebuild：${relative}`);
+  }
+}
+
+function assertHarnessRuntime(harnessDest, pin) {
   const requiredFiles = [
     path.join('apps', 'cli', 'lib', 'bin.js'),
     path.join('apps', 'web', 'dist', 'index.html'),
@@ -460,11 +573,16 @@ function assertHarnessRuntime(harnessDest) {
   if (!conversation.includes('conversation.chat.user-actions')) {
     throw new Error('安装包的会话 UI 缺少用户消息 action slot');
   }
+  assertHarnessVersions(harnessDest, pin);
+  assertNodePtyPrebuild(harnessDest);
 }
 
 module.exports = async function afterPack(context) {
   const projectDir = context.packager.projectDir;
   const resources = resolveResourcesDir(context);
+  restoreVendoredPluginNodeModules(projectDir, resources, 'dshmarket');
+  installPluginRuntimeDeps(path.join(resources, 'vendor', 'dshmarket'), { skipIfComplete: true });
+  assertVendoredPluginRuntimeDeps(resources, 'dshmarket');
   const harnessDest = path.join(resources, 'vendor', 'deepseek-harness');
   const deployDir = resolveDeployDir(process.env.DSH_DEPLOY_DIR);
   const started = Date.now();
@@ -484,7 +602,13 @@ module.exports = async function afterPack(context) {
 
   const nodeDest = copyBundledNode(resources);
   const pnpmDest = copyBundledPnpm(projectDir, resources);
-  assertHarnessRuntime(harnessDest);
+  const pin = JSON.parse(fs.readFileSync(path.join(projectDir, 'vendor', 'harness-upstream.json'), 'utf8'));
+  fs.mkdirSync(path.join(resources, 'vendor'), { recursive: true });
+  fs.writeFileSync(
+    path.join(resources, 'vendor', 'harness-upstream.json'),
+    `${JSON.stringify(pin, null, 2)}\n`,
+  );
+  assertHarnessRuntime(harnessDest, pin);
 
   const archive = path.join(resources, 'vendor', 'deepseek-harness.tar');
   console.log('打包运行时为单个 tar，减少 NSIS 解压文件数…');
@@ -509,3 +633,9 @@ module.exports.deployCliEntries = deployCliEntries;
 module.exports.resolveDeployDir = resolveDeployDir;
 module.exports.resolveResourcesDir = resolveResourcesDir;
 module.exports.assertHarnessRuntime = assertHarnessRuntime;
+module.exports.assertHarnessVersions = assertHarnessVersions;
+module.exports.assertNodePtyPrebuild = assertNodePtyPrebuild;
+module.exports.assertVendoredPluginRuntimeDeps = assertVendoredPluginRuntimeDeps;
+module.exports.installPluginRuntimeDeps = installPluginRuntimeDeps;
+module.exports.nodePtyPrebuildRelative = nodePtyPrebuildRelative;
+module.exports.restoreVendoredPluginNodeModules = restoreVendoredPluginNodeModules;

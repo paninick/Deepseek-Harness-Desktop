@@ -1,6 +1,7 @@
 /**
- * Vision-model picker: dropdowns over every configured model, persisting the
- * designated vision routes into the `vision-fallback` settings namespace.
+ * Vision-model picker: dropdowns over catalog models that advertise image
+ * input, persisting the designated vision routes into the `vision-fallback`
+ * settings namespace.
  * The host-side vision-fallback plugin reads that namespace; when the main
  * model cannot read images, it calls the designated model to describe them,
  * moving to the backup route when the primary attempt fails under the stored
@@ -10,7 +11,9 @@
 
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { IApiClient, ModelProviderGroup, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
+import type {
+  IApiClient, ModelProviderGroup, SettingsNamespaceView, SettingsPathOpView,
+} from '@deepseek-ai/dsh-api-remotes/client'
 import { getPath } from '@deepseek-ai/dsh-client-schema-form'
 import { messageOf } from './store.ts'
 import type { en } from './locales.ts'
@@ -46,14 +49,16 @@ function routeValue(provider: string, model: string): string {
   return `${provider}\n${model}`
 }
 
-/** Flatten catalog groups into selectable routes in catalog order. */
+/** Flatten catalog groups into selectable image-capable routes in catalog order. */
 function flattenGroups(groups: readonly ModelProviderGroup[]): RouteOption[] {
-  return groups.flatMap(group => group.models.map(model => ({
-    provider: group.id,
-    providerName: group.name,
-    model: model.id,
-    modelName: model.name,
-  })))
+  return groups.flatMap(group => group.models
+    .filter(model => model.inputModalities?.includes('image') === true)
+    .map(model => ({
+      provider: group.id,
+      providerName: group.name,
+      model: model.id,
+      modelName: model.name,
+    })))
 }
 
 /** Read one string field from the namespace's resolved value. */
@@ -62,15 +67,8 @@ function storedField(namespace: SettingsNamespaceView, field: string): string | 
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-/** One mutation op as the settings write carries it. */
-interface SettingsOp {
-  op: 'set' | 'unset'
-  path: string[]
-  value?: string
-}
-
 /** Set-or-unset ops for one route's two fields, from an encoded option value. */
-function routeOps(value: string, providerField: string, modelField: string): SettingsOp[] {
+function routeOps(value: string, providerField: string, modelField: string): SettingsPathOpView[] {
   return value === ''
     ? [{ op: 'unset', path: [providerField] }, { op: 'unset', path: [modelField] }]
     : (() => {
@@ -128,12 +126,12 @@ export function VisionModelPicker(props: VisionModelPickerProps): ReactNode {
     : ''
   const mode = storedField(namespace, 'mode') ?? 'auto'
   const known = options ?? []
-  // A stored route missing from the catalog (provider removed, model unlisted)
-  // stays visible and selected instead of silently snapping to "off".
+  // A stored route missing from the image-capable catalog (text-only, removed
+  // provider, model unlisted) stays visible instead of snapping to "off".
   const stale = current !== '' && !known.some(option => routeValue(option.provider, option.model) === current)
   const backupStale = backup !== '' && !known.some(option => routeValue(option.provider, option.model) === backup)
 
-  const save = (ops: SettingsOp[]): void => {
+  const save = (ops: SettingsPathOpView[]): void => {
     setSaveFailure(undefined)
     setSaving(true)
     void api.settings.mutate({ ns: VISION_FALLBACK_NS, ops, expectedRevision: namespace.revision })
@@ -212,6 +210,7 @@ export function VisionModelPicker(props: VisionModelPickerProps): ReactNode {
       </div>
       <p className={styles['advancedHint']}>{t('visionModelHint')}</p>
       <p className={styles['advancedHint']}>{t('visionModelBackupHint')}</p>
+      <p className={styles['advancedHint']}>{t('visionModelEndpointHint')}</p>
       {loadFailure === undefined
         ? null
         : <p className={styles['error']}>{`${t('visionModelLoadFailed')}: ${loadFailure}`}</p>}

@@ -74,7 +74,23 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * conversation snapshot through the standard kit.
      */
     'conversation.view': { kind: 'list'; scope: 'session'; owner: ConvViewOwnerProps }
-    /** Final business node renderer, dispatched by `ChatConversationViewNode.kind`. */
+    /**
+     * Optional empty-transcript occupancy: ChatView renders this list only
+     * while the ordered flow has no Nodes and the session is not running.
+     * Zero entries leave the transcript blank (ordinary New Session / coding
+     * chats). A desktop plugin can fill a contact roster without replacing
+     * the view.
+     */
+    'conversation.chat.empty': { kind: 'list'; scope: 'session' }
+    /**
+     * One Chat Node row in the transcript, keyed on `ChatNode.kind`. ChatView
+     * is the render site: it passes `ChatNodeOwnerProps` plus that Node, the
+     * Context key as `hookContext`, and a JsonBlock `fallback` for unknown
+     * kinds. A registrant occupies one kind (`key: 'user'`, `'tool-call'`,
+     * `'workflow-run'`, …) and receives that kind's `node` plus the injected
+     * turn-data hook. Registering the same key replaces that kind's renderer.
+     * No registration for a kind keeps the JsonBlock fallback.
+     */
     'conversation.chat.node': {
       kind: 'keyed'
       scope: 'session'
@@ -519,6 +535,10 @@ export interface ConversationSessionHeaderInjected {
   }
   /** Select a real Session through the runtime navigation owner. */
   open: (sessionId: SessionId) => void
+  hooks: {
+    /** Whether the header paints the Chat/Trajectory tablist. */
+    viewTabs: ObservableSnapshot<boolean>
+  }
 }
 
 /**
@@ -588,6 +608,12 @@ export interface ComposerBarInjected {
    */
   command: ((line: string) => Promise<boolean>) | undefined
   /**
+   * Optional `$skill` name lookup for the InputBar-local menu. Absent in
+   * production until a skill catalog injects it; missing inject shows no `$` menu.
+   * @param query - text after `$` at the caret.
+   */
+  listSkillNames?: (query: string) => readonly string[]
+  /**
    * Registrant hooks compartment: the renderer binds these to
    * useNotices/useLexicon (static absent sources without a session — hook
    * order stays constant).
@@ -600,6 +626,10 @@ export interface ComposerBarInjected {
     lexicon: ObservableSnapshot<ReadonlyMap<'/' | '@', readonly string[]>>
     /** Source name opened by the programmatic menu launcher, or null. */
     menuLauncher: ObservableSnapshot<string | null>
+    /** Whether InputBar paints `.cardBeam` while a turn is sending or thinking. */
+    composerBeam: ObservableSnapshot<boolean>
+    /** Whether InputBar and ApprovalPanel show the edge drag handles. */
+    composerResize: ObservableSnapshot<boolean>
   }
 }
 
@@ -662,7 +692,7 @@ export type ConversationSessionHeaderSlotProps =
   PropsRuntime<'conversation.session.header'>
   & PropsRenderSlots<'conversation.session.header.actions' | 'conversation.session.header.utilities'>
   & PropsStore<ChatStore>
-  & ConversationSessionHeaderInjected
+  & InjectFace<ConversationSessionHeaderInjected>
   & PropsLocale<'conversation'>
 
 /** The pending approval carrier the owner dispatches into the composer chain. */
@@ -719,15 +749,28 @@ export class PendingApproval {
 }
 
 /**
+ * Injected share of the approval-composer entry: the same resize preference
+ * InputBar reads, so the takeover can paint the same edge handles.
+ */
+export interface ApprovalComposerInjected {
+  hooks: {
+    /** Whether ApprovalPanel shows the same edge drag handles as InputBar. */
+    composerResize: ObservableSnapshot<boolean>
+  }
+}
+
+/**
  * Full approval-composer props: the framework runtime share (chain currency +
  * session/global standard kit) plus the chain `matched` share — the entry's
  * selector result, already narrowed to the approval carrier — plus the
- * standard locale seat. No injected share: the carrier plus the domain face
- * above carry the whole behavior surface; the paired command line derives
- * from useSession in-component.
+ * resize inject share and the standard locale seat. The paired command line
+ * derives from useSession in-component.
  */
 export type ApprovalComposerProps =
-  PropsRuntime<'conversation.composer'> & { matched: ApprovalWait } & PropsLocale<'conversation'>
+  PropsRuntime<'conversation.composer'>
+  & { matched: ApprovalWait }
+  & InjectFace<ApprovalComposerInjected>
+  & PropsLocale<'conversation'>
 
 /** In-memory reader position resilient to transcript width reflow. */
 export interface ChatScrollPosition {
@@ -780,7 +823,7 @@ export interface ChatViewInjected {
 
 /** Full chat-view component props: runtime & its Tool/command/tail render shares & store & injected & locale seat. */
 export type ChatViewSlotProps =
-  PropsRuntime<'conversation.view'> & PropsRenderSlots<'conversation.chat.node'>
+  PropsRuntime<'conversation.view'> & PropsRenderSlots<'conversation.chat.node' | 'conversation.chat.empty'>
   & PropsStore<ChatStore> & ChatViewInjected & PropsLocale<'conversation'>
 
 /**

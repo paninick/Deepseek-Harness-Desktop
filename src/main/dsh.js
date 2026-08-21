@@ -8,6 +8,7 @@ const { harnessRoot } = require('./paths');
 const { ensurePackagedHarness, harnessArchivePath } = require('./harness-extract');
 const { prependPath } = require('../shared/env-path');
 const { desktopInstallEnv } = require('./desktop-install-control');
+const { readPin } = require('../shared/harness-upstream');
 
 const PORT_SCAN_RANGE = 50;
 
@@ -426,6 +427,25 @@ function cancelledError(message = '启动已取消') {
   return error;
 }
 
+function defaultReadPin() {
+  const roots = [path.join(__dirname, '..', '..')];
+  try {
+    const { projectRoot } = require('./paths');
+    roots.unshift(projectRoot());
+  } catch {
+    // electron is unavailable outside the desktop process
+  }
+  let lastError;
+  for (const root of roots) {
+    try {
+      return readPin(root);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('vendor/harness-upstream.json is missing');
+}
+
 function failureRecord(phase, message, code, signal) {
   return {
     phase,
@@ -451,6 +471,7 @@ class DshManager extends EventEmitter {
     this.error = '';
     this.failure = null;
     this.baseUrl = '';
+    this.webReady = false;
     this.attached = false;
     this.host = '127.0.0.1';
     this.port = 3080;
@@ -469,6 +490,11 @@ class DshManager extends EventEmitter {
       killTree: options.killTree || killTree,
       killOwnedListeners: options.killOwnedListeners || killOwnedListeners,
       buildLaunch: options.buildLaunch || ((config) => this.buildLaunch(config)),
+      sourceHarnessStatus: options.sourceHarnessStatus || sourceHarnessStatus,
+      resolveDshBin: options.resolveDshBin || resolveDshBin,
+      resolveNpx: options.resolveNpx || resolveNpx,
+      resolveNodeBin: options.resolveNodeBin || resolveNodeBin,
+      readPin: options.readPin || defaultReadPin,
     };
   }
 
@@ -529,10 +555,19 @@ class DshManager extends EventEmitter {
     const host = config.host || '127.0.0.1';
     const port = Number(config.port) || 3080;
     const workspace = config.workspace;
-    const nodeBin = resolveNodeBin(config);
-    const npxBin = resolveNpx(nodeBin);
-    const source = sourceHarnessStatus();
-    const args = ['web', '--host', host, '--port', String(port)];
+    const nodeBin = this._deps.resolveNodeBin(config);
+    const npxBin = this._deps.resolveNpx(nodeBin);
+    const source = this._deps.sourceHarnessStatus();
+    const args = ['web'];
+    if (config.skipUserPlugins === true) {
+      args.push('--skip-user-plugins');
+    }
+    for (const patchFile of Array.isArray(config.patchFiles) ? config.patchFiles : []) {
+      if (typeof patchFile === 'string' && patchFile) {
+        args.push('--patch', patchFile);
+      }
+    }
+    args.push('--host', host, '--port', String(port));
 
     if (source.present) {
       if (!source.installed || !source.built) {
@@ -554,7 +589,7 @@ class DshManager extends EventEmitter {
       };
     }
 
-    const dshBin = resolveDshBin(config);
+    const dshBin = this._deps.resolveDshBin(config);
     if (dshBin) {
       return {
         command: dshBin,
@@ -568,12 +603,13 @@ class DshManager extends EventEmitter {
     }
 
     if (!npxBin) {
-      throw new Error('未找到 Node.js / npx。请安装 Node.js 18+ 并确保 npx 在 PATH 中。');
+      throw new Error('未找到 Node.js / npx。请安装 Node.js 22.19+ 或 24+ 并确保 npx 在 PATH 中。');
     }
 
+    const pin = this._deps.readPin();
     return {
       command: npxBin,
-      args: ['--yes', '@deepseek-ai/dsh', 'web', '--host', host, '--port', String(port)],
+      args: ['--yes', `@deepseek-ai/dsh@${pin.npm}`, ...args],
       nodeBin,
       kind: 'npx',
       host,
@@ -618,9 +654,10 @@ class DshManager extends EventEmitter {
       const text = chunk.toString('utf8');
       for (const line of text.split(/\r?\n/)) {
         this.log(line, source);
-        const match = line.match(/https?:\/\/(?:127\.0\.0\.1|localhost):\d+/i);
+        const match = line.match(/dsh web:\s*(https?:\/\/(?:127\.0\.0\.1|localhost):\d+)/i);
         if (match) {
-          this.baseUrl = match[0].replace(/\/$/, '');
+          this.baseUrl = match[1].replace(/\/$/, '');
+          this.webReady = true;
         }
       }
     };
@@ -689,12 +726,13 @@ class DshManager extends EventEmitter {
     }
 
     const port = Number(options.port) || Number(config.port) || 3080;
-    const launch = this._buildLaunch({ ...config, port });
+    const launch = this._buildLaunch({ ...config, ...options, port });
     const expectedUrl = `http://${launch.host}:${launch.port}`;
     this.host = launch.host;
     this.port = launch.port;
     this.error = '';
     this.attached = false;
+    this.webReady = false;
     this.setState('starting', { baseUrl: expectedUrl, attached: false, failure: null });
     this.log(`工作区 ${config.workspace}`);
     this.log(`启动本机服务 ${expectedUrl}`);
@@ -815,7 +853,7 @@ class DshManager extends EventEmitter {
         throw new Error(this.error || `dsh 已退出（code ${child.exitCode}）`);
       }
       const target = this.baseUrl || baseUrl;
-      if (await this._isReachable(target)) {
+      if (this.webReady && await this._isReachable(target)) {
         this.baseUrl = target;
         return target;
       }

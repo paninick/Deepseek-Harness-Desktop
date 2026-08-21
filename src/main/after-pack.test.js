@@ -8,11 +8,31 @@ const path = require('node:path');
 
 const {
   assertHarnessRuntime,
+  assertVendoredPluginRuntimeDeps,
   collectFiles,
   deployCliEntries,
+  nodePtyPrebuildRelative,
   resolveDeployDir,
   resolveResourcesDir,
+  restoreVendoredPluginNodeModules,
+  installPluginRuntimeDeps,
 } = require('../../scripts/after-pack');
+
+const RC7_PIN = { npm: '0.1.0-rc.7' };
+
+function writeRuntimeVersions(root, npm) {
+  fs.writeFileSync(path.join(root, 'package.json'), `${JSON.stringify({ version: npm })}\n`);
+  fs.mkdirSync(path.join(root, 'apps', 'cli'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'apps', 'cli', 'package.json'), `${JSON.stringify({ version: npm })}\n`);
+}
+
+function writeNodePtyPrebuild(root, platform = process.platform, arch = process.arch) {
+  const relative = nodePtyPrebuildRelative(platform, arch);
+  const file = path.join(root, 'node_modules', 'node-pty', relative);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(path.join(root, 'node_modules', 'node-pty', 'package.json'), '{"name":"node-pty"}\n');
+  fs.writeFileSync(file, 'native');
+}
 
 function makeFixture(t) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-test-'));
@@ -196,8 +216,10 @@ test('assertHarnessRuntime accepts a complete compatible host', (t) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, content);
   }
+  writeRuntimeVersions(root, RC7_PIN.npm);
+  writeNodePtyPrebuild(root);
 
-  assert.doesNotThrow(() => assertHarnessRuntime(root));
+  assert.doesNotThrow(() => assertHarnessRuntime(root, RC7_PIN));
 });
 
 test('assertHarnessRuntime rejects a host missing MCP settings runtime', (t) => {
@@ -227,7 +249,7 @@ test('assertHarnessRuntime rejects a host missing MCP settings runtime', (t) => 
   }
 
   assert.throws(
-    () => assertHarnessRuntime(root),
+    () => assertHarnessRuntime(root, RC7_PIN),
     /dsh-mcp-servers-file/,
   );
 });
@@ -241,8 +263,87 @@ test('assertHarnessRuntime rejects stale deploy output before archiving', (t) =>
   fs.writeFileSync(path.join(root, 'apps', 'web', 'dist', 'index.html'), '<!doctype html>\n');
 
   assert.throws(
-    () => assertHarnessRuntime(root),
+    () => assertHarnessRuntime(root, RC7_PIN),
     /dsh-app-boot.*features\.js/,
+  );
+});
+
+test('assertHarnessRuntime rejects pin.npm mismatch', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-pin-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const files = new Map([
+    [path.join('apps', 'cli', 'lib', 'bin.js'), 'export {}\n'],
+    [path.join('apps', 'cli', 'lib', 'plugin.js'), 'missingHostFeatures parseCompatibilityFeatures\n'],
+    [path.join('apps', 'web', 'dist', 'index.html'), '<!doctype html>\n'],
+    [
+      path.join('node_modules', '@deepseek-ai', 'dsh-app-boot', 'lib', 'features.js'),
+      'conversation.chat.user-actions session.fork.beforeSeq session.fork.blank\n',
+    ],
+    [
+      path.join('node_modules', '@deepseek-ai', 'dsh-client-modules', 'lib', 'index.js'),
+      'missingHostFeatures parseCompatibilityFeatures\n',
+    ],
+    [
+      path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-conversation', 'lib', 'client.js'),
+      'conversation.chat.user-actions\n',
+    ],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-mcp-servers-file', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-host-mcp-servers', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-host-skill-inventory', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-settings-mcp', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-settings-mcp', 'lib', 'client.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-settings-skills', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-settings-skills', 'lib', 'client.js'), 'export {}\n'],
+  ]);
+  for (const [relative, content] of files) {
+    const file = path.join(root, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
+  writeRuntimeVersions(root, '0.1.0-rc.5');
+  writeNodePtyPrebuild(root);
+  assert.throws(
+    () => assertHarnessRuntime(root, { npm: '0.1.0-rc.7' }),
+    /0\.1\.0-rc\.7/,
+  );
+});
+
+test('assertHarnessRuntime rejects a missing node-pty prebuild', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-pty-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const files = new Map([
+    [path.join('apps', 'cli', 'lib', 'bin.js'), 'export {}\n'],
+    [path.join('apps', 'cli', 'lib', 'plugin.js'), 'missingHostFeatures parseCompatibilityFeatures\n'],
+    [path.join('apps', 'web', 'dist', 'index.html'), '<!doctype html>\n'],
+    [
+      path.join('node_modules', '@deepseek-ai', 'dsh-app-boot', 'lib', 'features.js'),
+      'conversation.chat.user-actions session.fork.beforeSeq session.fork.blank\n',
+    ],
+    [
+      path.join('node_modules', '@deepseek-ai', 'dsh-client-modules', 'lib', 'index.js'),
+      'missingHostFeatures parseCompatibilityFeatures\n',
+    ],
+    [
+      path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-conversation', 'lib', 'client.js'),
+      'conversation.chat.user-actions\n',
+    ],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-mcp-servers-file', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-host-mcp-servers', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-host-skill-inventory', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-settings-mcp', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-settings-mcp', 'lib', 'client.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-settings-skills', 'lib', 'index.js'), 'export {}\n'],
+    [path.join('node_modules', '@deepseek-ai', 'dsh-client-ui-settings-skills', 'lib', 'client.js'), 'export {}\n'],
+  ]);
+  for (const [relative, content] of files) {
+    const file = path.join(root, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
+  writeRuntimeVersions(root, RC7_PIN.npm);
+  assert.throws(
+    () => assertHarnessRuntime(root, RC7_PIN),
+    /node-pty/,
   );
 });
 
@@ -283,4 +384,154 @@ test('resolveResourcesDir uses the unpacked resources folder on Windows', () => 
     }),
     path.join('dist', 'win-unpacked', 'resources'),
   );
+});
+
+test('restoreVendoredPluginNodeModules copies dropped plugin node_modules', (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-plugin-nm-'));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const projectDir = path.join(workspace, 'project');
+  const resources = path.join(workspace, 'resources');
+  const srcNm = path.join(projectDir, 'vendor', 'dshmarket', 'node_modules', 'undici');
+  const destPkg = path.join(resources, 'vendor', 'dshmarket');
+  fs.mkdirSync(srcNm, { recursive: true });
+  fs.mkdirSync(destPkg, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, 'vendor', 'dshmarket', 'package.json'),
+    `${JSON.stringify({ name: 'dshmarket', dependencies: { undici: '7.29.0' } })}\n`,
+  );
+  fs.writeFileSync(path.join(srcNm, 'package.json'), '{"name":"undici"}\n');
+  fs.writeFileSync(
+    path.join(destPkg, 'package.json'),
+    `${JSON.stringify({ name: 'dshmarket', dependencies: { undici: '7.29.0' } })}\n`,
+  );
+
+  const result = restoreVendoredPluginNodeModules(projectDir, resources, 'dshmarket');
+  assert.equal(result.restored, true);
+  assertVendoredPluginRuntimeDeps(resources, 'dshmarket');
+  assert.equal(
+    fs.existsSync(path.join(destPkg, 'node_modules', 'undici', 'package.json')),
+    true,
+  );
+});
+
+test('assertVendoredPluginRuntimeDeps rejects a packaged plugin without its dependencies', (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-plugin-missing-'));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const destPkg = path.join(workspace, 'vendor', 'dshmarket');
+  fs.mkdirSync(destPkg, { recursive: true });
+  fs.writeFileSync(
+    path.join(destPkg, 'package.json'),
+    `${JSON.stringify({ name: 'dshmarket', dependencies: { undici: '7.29.0' } })}\n`,
+  );
+  assert.throws(
+    () => assertVendoredPluginRuntimeDeps(workspace, 'dshmarket'),
+    /undici/,
+  );
+});
+
+test('assertVendoredPluginRuntimeDeps rejects a dependency whose export file is missing', (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-plugin-export-'));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const destPkg = path.join(workspace, 'vendor', 'dshmarket');
+  const yamlDir = path.join(destPkg, 'node_modules', 'js-yaml');
+  fs.mkdirSync(yamlDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(destPkg, 'package.json'),
+    `${JSON.stringify({ name: 'dshmarket', dependencies: { 'js-yaml': '4.1.1' } })}\n`,
+  );
+  fs.writeFileSync(path.join(yamlDir, 'package.json'), `${JSON.stringify({
+    name: 'js-yaml',
+    exports: { '.': { import: './dist/js-yaml.mjs', require: './index.js' } },
+  })}\n`);
+  fs.writeFileSync(path.join(yamlDir, 'index.js'), 'module.exports = {}\n');
+  assert.throws(
+    () => assertVendoredPluginRuntimeDeps(workspace, 'dshmarket'),
+    /js-yaml\.mjs/,
+  );
+});
+
+test('installPluginRuntimeDeps runs npm install when export files are missing', (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-plugin-npm-'));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const destPkg = path.join(workspace, 'vendor', 'dshmarket');
+  const yamlDir = path.join(destPkg, 'node_modules', 'js-yaml');
+  fs.mkdirSync(yamlDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(destPkg, 'package.json'),
+    `${JSON.stringify({ name: 'dshmarket', dependencies: { 'js-yaml': '4.1.1' } })}\n`,
+  );
+  fs.writeFileSync(path.join(yamlDir, 'package.json'), `${JSON.stringify({
+    name: 'js-yaml',
+    exports: { '.': { import: './dist/js-yaml.mjs' } },
+  })}\n`);
+  let ran = '';
+  const result = installPluginRuntimeDeps(destPkg, {
+    skipIfComplete: true,
+    run: (dir) => {
+      ran = dir;
+      fs.mkdirSync(path.join(dir, 'node_modules', 'js-yaml', 'dist'), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'node_modules', 'js-yaml', 'dist', 'js-yaml.mjs'),
+        'export default {}\n',
+      );
+    },
+  });
+  assert.equal(result.installed, true);
+  assert.equal(ran, destPkg);
+  assertVendoredPluginRuntimeDeps(workspace, 'dshmarket');
+});
+
+test('assertVendoredPluginRuntimeDeps accepts a hoisted nested dependency', (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-plugin-hoist-'));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const destPkg = path.join(workspace, 'vendor', 'dshmarket');
+  const yamlDir = path.join(destPkg, 'node_modules', 'js-yaml');
+  const argparseDir = path.join(destPkg, 'node_modules', 'argparse');
+  fs.mkdirSync(path.join(yamlDir, 'dist'), { recursive: true });
+  fs.mkdirSync(argparseDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(destPkg, 'package.json'),
+    `${JSON.stringify({ name: 'dshmarket', dependencies: { 'js-yaml': '4.1.1' } })}\n`,
+  );
+  fs.writeFileSync(path.join(yamlDir, 'package.json'), `${JSON.stringify({
+    name: 'js-yaml',
+    exports: { '.': { import: './dist/js-yaml.mjs' } },
+    dependencies: { argparse: '2.0.1' },
+  })}\n`);
+  fs.writeFileSync(path.join(yamlDir, 'dist', 'js-yaml.mjs'), 'export default {}\n');
+  fs.writeFileSync(
+    path.join(argparseDir, 'package.json'),
+    `${JSON.stringify({ name: 'argparse', main: './index.js' })}\n`,
+  );
+  fs.writeFileSync(path.join(argparseDir, 'index.js'), 'module.exports = {}\n');
+  assert.doesNotThrow(() => assertVendoredPluginRuntimeDeps(workspace, 'dshmarket'));
+});
+
+test('installPluginRuntimeDeps skipIfComplete does not run npm when export files exist', (t) => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'after-pack-plugin-skip-'));
+  t.after(() => fs.rmSync(workspace, { recursive: true, force: true }));
+  const destPkg = path.join(workspace, 'vendor', 'dshmarket');
+  const yamlDir = path.join(destPkg, 'node_modules', 'js-yaml', 'dist');
+  fs.mkdirSync(yamlDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(destPkg, 'package.json'),
+    `${JSON.stringify({ name: 'dshmarket', dependencies: { 'js-yaml': '4.1.1' } })}\n`,
+  );
+  fs.writeFileSync(
+    path.join(destPkg, 'node_modules', 'js-yaml', 'package.json'),
+    `${JSON.stringify({
+      name: 'js-yaml',
+      exports: { '.': { import: './dist/js-yaml.mjs' } },
+    })}\n`,
+  );
+  fs.writeFileSync(path.join(yamlDir, 'js-yaml.mjs'), 'export default {}\n');
+  let ran = false;
+  const result = installPluginRuntimeDeps(destPkg, {
+    skipIfComplete: true,
+    run: () => {
+      ran = true;
+    },
+  });
+  assert.equal(result.installed, false);
+  assert.equal(ran, false);
 });

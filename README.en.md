@@ -26,11 +26,22 @@ The macOS build is unsigned: right-click → Open, or run `xattr -cr /Applicatio
 - **Git** — Switch branches, commit, push, and open a pull request from the title bar.
 - **Files and terminal** — `Ctrl+\` opens the right column (Files / Diff / Browser / Agents); `` Ctrl+` `` opens the bottom terminal. A selection can join chat.
 - **Models** — Thinking intensity for third-party models, vision fallback; the latest user message can be edited and resent.
-- **Appearance** — Light / dark themes, wallpaper, glass.
-- **Extensions** — MCP, Skills, and plugins in Settings. The marketplace is GitHub [dsh-plugin](https://github.com/topics/dsh-plugin).
-- **Desktop** — Minimize to tray, auto-update. If Harness dies, the window returns to a failure page and restarts.
+- **Appearance** — Light / dark themes. Pick a wallpaper or Browse the gallery (categories, search, favorites; confirm crops to the window). Frost and pixelate stay on Appearance.
+- **Extensions** — MCP, Skills, and plugins in Settings. The marketplace is the bundled [dsh-market](https://github.com/dsh-market/dsh-market) plugin (`dshmarket`). There is no standalone marketplace window.
+- **Desktop** — Minimize to tray, auto-update. If Harness dies, the window returns to a failure page and restarts. If a user plugin blocks startup, the boot page can skip the plugin tree.
 
 `Ctrl+,` opens Settings.
+
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="assets/screenshot-surfaces.jpg" alt="Chat and Files column" /></td>
+    <td align="center" width="50%"><img src="assets/screenshot-wallpaper.jpg" alt="Wallpaper" /></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><img src="assets/screenshot-themes.jpg" alt="Theme library" /></td>
+    <td align="center" width="50%"><img src="assets/screenshot-appearance.jpg" alt="Appearance settings" /></td>
+  </tr>
+</table>
 
 ## Run from source
 
@@ -50,9 +61,11 @@ The first `setup:harness` builds the vendored `vendor/deepseek-harness` — slow
 
 Edit the UI in `vendor/deepseek-harness`. Follow the [design language](docs/design-language.en.md) and [motion](docs/motion.en.md). After changing client sources, run `pnpm run build:lib:client` there and restart the desktop app.
 
+The current official baseline is `vendor/harness-upstream.json`: `0.1.0-rc.7` (`dsh-v0.1.0-rc.7` / `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`). The npx fallback is official `@deepseek-ai/dsh@0.1.0-rc.7` and does not include the titlebar, Git, surfaces column, or terminal drawer; those ship only on the source and packaged paths.
+
 ```powershell
 npm test              # desktop unit tests
-npm run sync:harness  # pull official Harness
+npm run sync:harness -- --ref dsh-v0.1.0-rc.7 --sha 99f6f02fecdb7dff40c3fbc9470f5907c29f74ca
 npm run dist          # Windows installer
 npm run dist:mac      # macOS installer (must run on macOS)
 ```

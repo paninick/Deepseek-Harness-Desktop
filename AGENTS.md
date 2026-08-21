@@ -11,12 +11,12 @@ Any UI, layout, or frontend change must follow the official `dsh web` visual lan
 - Token / CSS Modules mechanics: [vendor/deepseek-harness/docs/web-styling.md](vendor/deepseek-harness/docs/web-styling.md)
 - Client plugin rules: [vendor/deepseek-harness/packages/client/AGENTS.md](vendor/deepseek-harness/packages/client/AGENTS.md)
 
-Reuse `ui-primitives` and `--dsw-alias-*` tokens. The boot page consumes official font/motion tokens from [src/shared/dsh-webui-tokens.css](src/shared/dsh-webui-tokens.css) plus the `--boot-*` table in [src/renderer/boot-tokens.css](src/renderer/boot-tokens.css). `src/renderer/marketplace/marketplace.css` still carries a parallel palette; do not copy those hex values.
+Reuse `ui-primitives` and `--dsw-alias-*` tokens. The boot page consumes official font/motion tokens from [src/shared/dsh-webui-tokens.css](src/shared/dsh-webui-tokens.css) plus the `--boot-*` table in [src/renderer/boot-tokens.css](src/renderer/boot-tokens.css).
 
 Harness-internal work also follows [vendor/deepseek-harness/AGENTS.md](vendor/deepseek-harness/AGENTS.md).
 
 ## Surfaces and terminal (work loops)
 
-The right column and conversation terminal drawer implement **work loops** (Files search/save, Browser navigation, Diff scopes, selection into chat), not an empty-state card grid. Empty-state cards are not done. Contract: [2026-08-16-surfaces-terminal-work-loops.md](vendor/deepseek-harness/.agents/notes/implemented/feature/2026-08-16-surfaces-terminal-work-loops.md). Out of scope (GPU terminal embedding, worktree, turn-diff, review comments, PiP, jump-to-line) stays in that note; do not fake those capabilities.
+The right column and conversation terminal drawer implement **work loops** (Files search/save, Browser navigation, Diff scopes, selection into chat), not an empty-state card grid. Empty-state cards are not done. Contract: [2026-08-16-surfaces-terminal-work-loops.md](vendor/deepseek-harness/.agents/notes/implemented/feature/2026-08-16-surfaces-terminal-work-loops.md). Out of scope (GPU terminal embedding, worktree, turn-diff, review-comment pick) stays in that note; do not fake those capabilities.
 
 Surface tabs keep the close control **to the right of the title**. Do not move it unless the user explicitly asks.

@@ -893,6 +893,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Owns `$DSH_HOME/mcp-servers.yaml` and the live mcp-client children it describes.',
     methods: [
       {
+        signature: 'readonly spec: ResolvedSpec',
+        description: 'Resolved document path and watch policy for this instance.',
+        parameters: [],
+      },
+      {
         signature: 'useMounter(mounter: McpClientMounter): void',
         description: 'Replace the child mounter. Tests call this before start.',
         parameters: [{ name: 'mounter', description: 'child factory.' }],
@@ -3755,6 +3760,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResolvedRetryPolicy',
     declaration: 'export type ResolvedRetryPolicy = ResolvedNormalRetryPolicy | ResolvedAlwaysRetryPolicy;',
+  },
+  {
+    name: 'ResolvedSpec',
+    declaration: 'export interface ResolvedSpec {\n    readonly filename: string;\n    readonly watch: boolean;\n    readonly debounceMs: number;\n}',
   },
   {
     name: 'ResolvedSubagentStartRequest',

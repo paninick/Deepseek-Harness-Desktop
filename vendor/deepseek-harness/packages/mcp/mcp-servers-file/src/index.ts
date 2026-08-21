@@ -6,19 +6,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { McpServersFile } from './service.ts'
+import { McpServersFile, type McpServersFileOptions } from './service.ts'
 
 /** Plugin configuration. Merges with the Zod `Config` schema below. */
-export interface Config {
-  /** Absolute or home-relative document path. Defaults to `$DSH_HOME/mcp-servers.yaml`. */
-  path?: string
-  /** Harness home used when `path` is omitted. */
-  dshHome?: string
-  /** Watch the document and remount children after an external write. */
-  watch?: boolean
-  /** Chokidar stability window in milliseconds. */
-  debounceMs?: number
-}
+export interface Config extends McpServersFileOptions {}
 export type { ChildHandle, McpClientMounter, ResolvedSpec } from './service.ts'
 export { McpServersFile, defaultMounter, resolveSpec } from './service.ts'
 export type {

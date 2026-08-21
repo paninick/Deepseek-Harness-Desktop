@@ -1,27 +1,35 @@
 # @deepseek-ai/dsh-llm-vision-fallback
-
 [English](README.md) | 中文
 
-由用户指定的视觉模型为图片附件生成描述，使纯文本主模型（例如 DeepSeek）也能处理它们。
+由用户指定的视觉模型为图片附件生成描述，使纯文本主模型（例如 DeepSeek）也能处理这些图片。
 
-Models 设置页把指定的路由存入 `vision-fallback` 设置 namespace：主路由（`provider` + `model`，两者皆缺省时停用该功能）、可选的备用路由（`backupProvider` + `backupModel`），以及选择策略（`mode`：`'auto'`、`'primary'` 或 `'backup'`，缺省按 `'auto'` 处理）。只要 `ctx.visionFallback.configured()` 为真，apiproxy 的准入闸门就允许纯文本主模型接收带图片的提示；agent loop 在每次派发请求前调用 `ctx.visionFallback.rewriteMessages()`：发往 `inputModalities` 不含 `'image'` 的模型的图片块，会被指定视觉模型一次性生成的描述文本替换。
+模型设置页把指定路由保存在 `vision-fallback` 设置命名空间（`provider` + `model`；两者皆缺省即关闭该功能）。apiproxy 准入门在 `ctx.visionFallback.configured()` 为真时，为纯文本主模型放行带图请求；agent 循环在每次派发请求前调用 `ctx.visionFallback.rewriteMessages()`：目的地模型的 `inputModalities` 不含 `'image'` 时，图片块会被替换为由指定视觉模型一次性生成的描述文本。`read_image` 工具的路由门（[`@deepseek-ai/dsh-tool-fs`](../../fs/tool-fs)）同样在服务已配置时为纯文本路由放行，工具读入的图片因此走同一套替换。
 
-`'auto'` 下主路由先行；当其调用失败——超时、传输错误、限流、提供方拒绝、甚至空描述——会在失败传给主请求之前，改用备用路由并重新获得完整的超时窗口。`'primary'` 与 `'backup'` 固定单一路由、从不切换；备用与主路由相同时会被去重，`'auto'` 绝不会为同一张图片把同一端点调用两次。唯一不切换的失败是用户自己取消主请求。
+每条生成的描述都会在主请求派发前以 `vision/describe` 事件追加进会话日志，因此改写后的请求可从日志完整重建，后续步骤会复用已记录的描述而不是重复描述。
 
-每条生成的描述都会在主请求派发前以 `vision/describe` 事件追加到会话日志，并携带实际生成它的路由，因此改写后的请求始终可由日志重建，后续步骤也复用已记录的描述而不是重新识图。
+## 配置
 
-## Config
+- `maxOutputTokens` — 视觉调用的输出 token 上限。
+- `timeoutMs` — 视觉调用的端到端超时（毫秒）。
 
-- `maxOutputTokens` —— 视觉调用的输出 token 上限。
-- `timeoutMs` —— 单次尝试的视觉调用时限（毫秒）；每个路由各有一个完整窗口。
+## 模型体验
 
-## Model Experience
+### 视觉描述替换
 
-纯文本路由上的主模型从不接触原始图片字节；它看到的是替换每张图片的 `【图片…】…【图片描述结束】` 包裹文本块，内容为视觉模型的描述。指定的视觉模型对每张新图片发起一次辅助请求（固定的中文 system prompt，要求忠实转写并描述布局）。描述按附件在会话内只生成一次，之后从日志回放，因此 token 成本是每张图片一次辅助调用，加上描述文本在此后每个主请求中的携带。发生切换的识图最多为该图片在备用路由上增加一次辅助调用。
+#### 模型看到的内容
 
-## Known Limitations and Deferred Work
+纯文本主模型收到以 `【图片…】…【图片描述结束】` 包裹的描述文本，代替每个图片块。指定视觉模型对每张新图片收到一次辅助请求，系统提示为固定中文，要求忠实转录与版面描述。
 
-- 描述整体替换，没有超出 `maxOutputTokens` 之外的单图体积上限。
-- 所有指定路由都失败的识图调用会使主请求显式失败，而不是降级为占位文本。
-- 切换对任何非取消类失败都会继续下一路；尚未对提供方错误分类，因此凭据无效也会先多消耗一次备用调用才浮出错误。
-- 设置 UI 把所有已配置模型都列为候选；由于浏览器侧模型目录不携带 `inputModalities`，暂时无法过滤出真正具备视觉能力的路由。
+#### Token 影响
+
+每张新附件每个会话一次辅助视觉调用，加上此后每次主请求携带的描述文本。后续步骤回放已记录的 `vision/describe` 事件，不再重复描述。
+
+#### KV Cache 影响
+
+替换后的描述文本进入组装前缀；新描述或被改写图片集合的变化会从该 token 起打断缓存复用。
+
+## 已知限制与后续工作
+
+- 描述是整体替换的；除 `maxOutputTokens` 外没有按图片的大小上限。
+- 视觉调用失败会让主请求显式失败，而不是降级为占位文本。
+- 模型页下拉框只列出 `inputModalities` 含 `'image'` 的目录行。不在该列表中的已存指定仍保持选中。手写 `settings.yaml` 仍可点名纯文本路由，且无论该路由宣称何种模态，`configured()` 都为真。
