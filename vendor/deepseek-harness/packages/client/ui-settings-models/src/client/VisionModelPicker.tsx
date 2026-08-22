@@ -1,6 +1,7 @@
 /**
- * Vision-model picker: dropdowns over every configured model, persisting the
- * designated vision routes into the `vision-fallback` settings namespace.
+ * Vision-model picker: dropdowns over catalog models that advertise image
+ * input, persisting the designated vision routes into the `vision-fallback`
+ * settings namespace.
  * The host-side vision-fallback plugin reads that namespace; when the main
  * model cannot read images, it calls the designated model to describe them,
  * moving to the backup route when the primary attempt fails under the stored
@@ -46,14 +47,16 @@ function routeValue(provider: string, model: string): string {
   return `${provider}\n${model}`
 }
 
-/** Flatten catalog groups into selectable routes in catalog order. */
+/** Flatten catalog groups into selectable image-capable routes in catalog order. */
 function flattenGroups(groups: readonly ModelProviderGroup[]): RouteOption[] {
-  return groups.flatMap(group => group.models.map(model => ({
-    provider: group.id,
-    providerName: group.name,
-    model: model.id,
-    modelName: model.name,
-  })))
+  return groups.flatMap(group => group.models
+    .filter(model => model.inputModalities?.includes('image') === true)
+    .map(model => ({
+      provider: group.id,
+      providerName: group.name,
+      model: model.id,
+      modelName: model.name,
+    })))
 }
 
 /** Read one string field from the namespace's resolved value. */
@@ -126,8 +129,8 @@ export function VisionModelPicker(props: VisionModelPickerProps): ReactNode {
     : ''
   const mode = storedField(namespace, 'mode') ?? 'auto'
   const known = options ?? []
-  // A stored route missing from the catalog (provider removed, model unlisted)
-  // stays visible and selected instead of silently snapping to "off".
+  // A stored route missing from the image-capable catalog (text-only, removed
+  // provider, model unlisted) stays visible instead of snapping to "off".
   const stale = current !== '' && !known.some(option => routeValue(option.provider, option.model) === current)
   const backupStale = backup !== '' && !known.some(option => routeValue(option.provider, option.model) === backup)
 
@@ -210,6 +213,7 @@ export function VisionModelPicker(props: VisionModelPickerProps): ReactNode {
       </div>
       <p className={styles['advancedHint']}>{t('visionModelHint')}</p>
       <p className={styles['advancedHint']}>{t('visionModelBackupHint')}</p>
+      <p className={styles['advancedHint']}>{t('visionModelEndpointHint')}</p>
       {loadFailure === undefined
         ? null
         : <p className={styles['error']}>{`${t('visionModelLoadFailed')}: ${loadFailure}`}</p>}
