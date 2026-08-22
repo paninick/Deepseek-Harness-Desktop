@@ -6,6 +6,16 @@
  * @module @deepseek-ai/dsh-client-ui-attachment
  */
 
+/**
+ * Host-half plugin shim: the web profile includes this package as a cordis
+ * loader entry, and the loader rejects a module namespace without plugin
+ * shape ("expect function or object with an apply method"). There is no
+ * host-side behavior — the atoms below are consumed by other client
+ * plugins' browser halves — so this mirrors the upstream host half's
+ * empty apply.
+ */
+export function apply(): void {}
+
 export { AttachmentRail } from './AttachmentRail.tsx'
 export type { AttachmentRailItem, AttachmentRailLabels } from './AttachmentRail.tsx'
 export { DropOverlay } from './DropOverlay.tsx'

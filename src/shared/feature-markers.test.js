@@ -42,6 +42,11 @@ test('ui-primitives keeps exporting useDismissOnOutsidePointer', () => {
   assert.match(index, /useDismissOnOutsidePointer/);
 });
 
+test('ui-attachment keeps its cordis loader-entry shape (empty host apply)', () => {
+  const index = read(path.join('vendor', 'deepseek-harness', 'packages', 'client', 'ui-attachment', 'src', 'index.ts'));
+  assert.match(index, /export function apply/, 'web profile includes ui-attachment as a cordis entry; without an apply the loader dies with "invalid plugin" (dsh web boot, 2026-08-22)');
+});
+
 test('katex stylesheet loads only in the vite web entry, never the Node half', () => {
   const webEntry = read(path.join('vendor', 'deepseek-harness', 'apps', 'web', 'src', 'main.ts'));
   assert.match(webEntry, /katex\/dist\/katex\.min\.css/);
