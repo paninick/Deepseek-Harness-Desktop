@@ -20,7 +20,9 @@ import {
   wrapBlockChildren,
 } from './render.tsx'
 import type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
-import 'katex/dist/katex.min.css'
+// katex.min.css loads in the vite app entry (apps/web/src/main.ts): this
+// module is also bundled into the Node-half lib the host loader imports,
+// where a bare .css import crashes ESM resolution.
 import css from './MarkdownText.module.css'
 
 export type { MarkdownCodeLabels, MarkdownFileMentions } from './render.tsx'
